@@ -1,0 +1,1259 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="A pixel zen garden. Rake the sand, place stones, and rake rings around them.">
+<meta name="theme-color" content="#e6dbc2">
+<style>[hidden]{display:none!important}</style>
+<title>Zen Garden</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Silkscreen&display=swap">
+<style>
+/* Layout: the whole window is a raked sand garden. Round buttons sit in three corners, the tool bar
+   floats at the bottom centre, and settings open as a small panel. One deliberate look per time of day. */
+:root {
+  --sand: #e6dbc2;
+  --ink: #f3ecde;
+  --muted: #cfc3aa;
+  --panel: rgba(24, 20, 16, 0.9);
+  --line: rgba(235, 222, 196, 0.24);
+  --accent: #d6aa5c;
+  --pixel: "Silkscreen", ui-monospace, "Courier New", monospace;
+  color-scheme: dark;
+}
+body.night {
+  --panel: rgba(12, 16, 26, 0.92);
+  --line: rgba(190, 205, 235, 0.24);
+  --accent: #aac4e6;
+  --muted: #b3bdd3;
+}
+html, body { height: 100%; }
+body {
+  margin: 0;
+  overflow: hidden;
+  background: var(--sand);
+  color: var(--ink);
+  font-family: var(--pixel);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+#garden {
+  position: fixed;
+  left: 0;
+  top: 0;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  touch-action: none;
+  cursor: none;
+}
+
+/* ---- corner buttons ---- */
+.ctl { position: fixed; z-index: 2; transition: opacity 0.7s ease; }
+body.idle .ctl { opacity: 0; pointer-events: none; }
+body.idle #tools { opacity: 0.0; pointer-events: none; }
+.round {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  color: var(--ink);
+  cursor: pointer;
+  padding: 0;
+}
+.round svg { width: 28px; height: 28px; shape-rendering: crispEdges; }
+#fsBtn { top: calc(14px + env(safe-area-inset-top, 0px)); left: calc(14px + env(safe-area-inset-left, 0px)); }
+#settingsBtn { top: calc(14px + env(safe-area-inset-top, 0px)); right: calc(14px + env(safe-area-inset-right, 0px)); }
+#soundBtn { bottom: calc(14px + env(safe-area-inset-bottom, 0px)); left: calc(14px + env(safe-area-inset-left, 0px)); }
+#fsBtn .fs-exit, #soundBtn .waves { display: none; }
+#fsBtn[aria-pressed="true"] .fs-exit, #soundBtn[aria-pressed="true"] .waves { display: block; }
+#fsBtn[aria-pressed="true"] .fs-enter, #soundBtn[aria-pressed="true"] .mute { display: none; }
+#soundBtn[aria-pressed="true"] { border-color: var(--accent); }
+button:focus-visible, input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+/* ---- tool bar ---- */
+#tools {
+  position: fixed;
+  z-index: 2;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+  display: flex;
+  gap: 8px;
+  padding: 8px;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  border-radius: 10px;
+  transition: opacity 0.7s ease;
+}
+.tool {
+  width: 84px;
+  height: 52px;
+  display: grid;
+  grid-template-rows: 1fr auto;
+  justify-items: center;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 0 5px;
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.06);
+  border: 2px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.tool svg { width: 30px; height: 20px; shape-rendering: crispEdges; }
+.tool[aria-pressed="true"] { color: var(--ink); border-color: var(--accent); background: rgba(255, 255, 255, 0.12); }
+.tool.undo { width: 64px; }
+.tool:disabled { opacity: 0.4; cursor: default; }
+
+/* ---- toast & hint ---- */
+#toast, #hint {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  pointer-events: none;
+  text-align: center;
+  white-space: nowrap;
+  transition: opacity 0.6s ease;
+}
+#toast {
+  top: calc(22px + env(safe-area-inset-top, 0px));
+  font-size: 15px;
+  letter-spacing: 0.08em;
+  padding: 6px 12px;
+  border-radius: 6px;
+  background: var(--panel);
+  opacity: 0;
+}
+#toast.show { opacity: 1; transition: none; }
+#hint {
+  bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+  font-size: 13px;
+  line-height: 1.8;
+  letter-spacing: 0.06em;
+  padding: 8px 14px;
+  border-radius: 6px;
+  background: var(--panel);
+}
+#hint.gone { opacity: 0; }
+
+/* ---- settings ---- */
+#panel {
+  position: fixed;
+  z-index: 3;
+  top: calc(76px + env(safe-area-inset-top, 0px));
+  right: calc(14px + env(safe-area-inset-right, 0px));
+  width: min(300px, calc(100vw - 28px));
+  max-height: calc(100% - 100px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 16px 18px 18px;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr);
+  background: var(--panel);
+  border: 2px solid var(--line);
+  border-radius: 6px;
+}
+#panel[hidden] { display: none; }
+#panel header { display: flex; align-items: center; justify-content: space-between; }
+#panel h2 { margin: 0; font-size: 16px; font-weight: 400; letter-spacing: 0.1em; }
+.textbtn {
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: var(--ink);
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+.field { display: grid; gap: 8px; }
+.field > label, .field > .label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+.field output { color: var(--ink); font-variant-numeric: tabular-nums; }
+input[type="range"] { width: 100%; margin: 0; accent-color: var(--accent); }
+.choices { display: grid; gap: 6px; grid-template-columns: repeat(3, 1fr); }
+.choices.four { grid-template-columns: repeat(4, 1fr); }
+.choices.two { grid-template-columns: repeat(2, 1fr); }
+.choice {
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.06);
+  border: 2px solid transparent;
+  border-radius: 4px;
+  padding: 8px 2px;
+  cursor: pointer;
+}
+.choice[aria-pressed="true"] { border-color: var(--accent); }
+.swatch { height: 22px; border-radius: 3px; margin-bottom: 6px; border: 1px solid rgba(0, 0, 0, 0.25); }
+.actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.actions .wide { grid-column: 1 / -1; }
+.keys { margin: 0; font-size: 11px; line-height: 1.8; letter-spacing: 0.05em; color: var(--muted); }
+@media (prefers-reduced-motion: reduce) {
+  .ctl, #tools, #toast, #hint { transition: none; }
+}
+</style>
+</head>
+<body>
+<canvas id="garden" aria-label="A raked sand garden. Drag to rake the sand, or choose the stone tool to place stones."></canvas>
+
+<button class="ctl round" id="fsBtn" aria-label="Full screen" aria-pressed="false" hidden>
+  <svg viewBox="0 0 14 14" aria-hidden="true" fill="currentColor">
+    <g class="fs-enter">
+      <rect x="1" y="1" width="4" height="1"/><rect x="1" y="1" width="1" height="4"/>
+      <rect x="9" y="1" width="4" height="1"/><rect x="12" y="1" width="1" height="4"/>
+      <rect x="1" y="12" width="4" height="1"/><rect x="1" y="9" width="1" height="4"/>
+      <rect x="9" y="12" width="4" height="1"/><rect x="12" y="9" width="1" height="4"/>
+    </g>
+    <g class="fs-exit">
+      <rect x="1" y="4" width="4" height="1"/><rect x="4" y="1" width="1" height="4"/>
+      <rect x="9" y="4" width="4" height="1"/><rect x="9" y="1" width="1" height="4"/>
+      <rect x="1" y="9" width="4" height="1"/><rect x="4" y="9" width="1" height="4"/>
+      <rect x="9" y="9" width="4" height="1"/><rect x="9" y="9" width="1" height="4"/>
+    </g>
+  </svg>
+</button>
+
+<button class="ctl round" id="settingsBtn" aria-label="Garden settings" aria-expanded="false" aria-controls="panel">
+  <svg viewBox="0 0 14 14" aria-hidden="true" fill="currentColor">
+    <rect x="2" y="3" width="10" height="1"/><rect x="8" y="2" width="2" height="3"/>
+    <rect x="2" y="7" width="10" height="1"/><rect x="4" y="6" width="2" height="3"/>
+    <rect x="2" y="11" width="10" height="1"/><rect x="9" y="10" width="2" height="3"/>
+  </svg>
+</button>
+
+<button class="ctl round" id="soundBtn" aria-label="Sound on" aria-pressed="false">
+  <svg viewBox="0 0 14 14" aria-hidden="true" fill="currentColor">
+    <rect x="1" y="5" width="3" height="4"/><rect x="4" y="4" width="1" height="6"/><rect x="5" y="3" width="1" height="8"/><rect x="6" y="2" width="1" height="10"/>
+    <g class="waves"><rect x="9" y="5" width="1" height="4"/><rect x="11" y="3" width="1" height="8"/><rect x="10" y="4" width="1" height="1"/><rect x="10" y="9" width="1" height="1"/></g>
+    <g class="mute"><rect x="9" y="5" width="1" height="1"/><rect x="10" y="6" width="1" height="1"/><rect x="11" y="7" width="1" height="1"/><rect x="12" y="8" width="1" height="1"/><rect x="12" y="5" width="1" height="1"/><rect x="11" y="6" width="1" height="1"/><rect x="10" y="7" width="1" height="1"/><rect x="9" y="8" width="1" height="1"/></g>
+  </svg>
+</button>
+
+<nav id="tools" aria-label="Tools">
+  <button class="tool" data-tool="rake" aria-pressed="true" title="Rake (1)">
+    <svg viewBox="0 0 15 10" aria-hidden="true" fill="currentColor">
+      <rect x="2" y="0" width="1" height="3"/><rect x="5" y="0" width="1" height="3"/><rect x="8" y="0" width="1" height="3"/><rect x="11" y="0" width="1" height="3"/>
+      <rect x="2" y="3" width="10" height="1"/><rect x="6" y="4" width="2" height="6"/>
+    </svg>
+    rake
+  </button>
+  <button class="tool" data-tool="stone" aria-pressed="false" title="Stone (2)">
+    <svg viewBox="0 0 15 10" aria-hidden="true">
+      <rect x="3" y="3" width="9" height="5" fill="#8f8b82"/><rect x="4" y="2" width="6" height="1" fill="#8f8b82"/><rect x="2" y="5" width="1" height="2" fill="#8f8b82"/>
+      <rect x="4" y="3" width="4" height="2" fill="#c3beb2"/><rect x="3" y="8" width="9" height="1" fill="#5d5a54"/>
+    </svg>
+    stone
+  </button>
+  <button class="tool" data-tool="smooth" aria-pressed="false" title="Smooth (3)">
+    <svg viewBox="0 0 15 10" aria-hidden="true" fill="currentColor">
+      <rect x="2" y="6" width="11" height="2"/><rect x="4" y="4" width="7" height="2"/><rect x="6" y="2" width="3" height="2"/><rect x="7" y="0" width="1" height="2"/>
+    </svg>
+    smooth
+  </button>
+  <button class="tool" data-tool="rings" aria-pressed="false" title="Rings (4)">
+    <svg viewBox="0 0 15 10" aria-hidden="true" fill="currentColor">
+      <rect x="6" y="4" width="3" height="2"/>
+      <rect x="4" y="2" width="7" height="1"/><rect x="4" y="7" width="7" height="1"/><rect x="3" y="3" width="1" height="4"/><rect x="11" y="3" width="1" height="4"/>
+      <rect x="2" y="0" width="11" height="1"/><rect x="2" y="9" width="11" height="1"/><rect x="0" y="1" width="2" height="8"/><rect x="13" y="1" width="2" height="8"/>
+    </svg>
+    rings
+  </button>
+  <button class="tool undo" id="undoBtn" title="Undo (Ctrl+Z)" disabled>
+    <svg viewBox="0 0 15 10" aria-hidden="true" fill="currentColor">
+      <rect x="1" y="3" width="1" height="1"/><rect x="2" y="2" width="1" height="3"/><rect x="3" y="1" width="1" height="5"/>
+      <rect x="4" y="3" width="7" height="1"/><rect x="11" y="4" width="1" height="1"/><rect x="12" y="5" width="1" height="3"/><rect x="11" y="8" width="1" height="1"/><rect x="7" y="9" width="4" height="1"/>
+    </svg>
+    undo
+  </button>
+</nav>
+
+<div id="toast" role="status" aria-live="polite"></div>
+<div id="hint">drag to rake the sand<br>pick a tool below to place stones</div>
+
+<section id="panel" role="dialog" aria-label="Garden settings" hidden>
+  <header>
+    <h2>garden</h2>
+    <button class="textbtn" id="closeBtn">close</button>
+  </header>
+
+  <div class="field">
+    <span class="label" id="sandLabel">sand</span>
+    <div class="choices four" id="sand" role="group" aria-labelledby="sandLabel"></div>
+  </div>
+
+  <div class="field">
+    <span class="label" id="timeLabel">time of day</span>
+    <div class="choices" id="time" role="group" aria-labelledby="timeLabel"></div>
+  </div>
+
+  <div class="field">
+    <label for="tines">rake width <output id="tinesOut" for="tines">4 tines</output></label>
+    <input type="range" id="tines" min="2" max="8" step="1" value="4">
+  </div>
+
+  <div class="field">
+    <label for="depth">groove depth <output id="depthOut" for="depth">3</output></label>
+    <input type="range" id="depth" min="1" max="5" step="1" value="3">
+  </div>
+
+  <div class="field">
+    <span class="label" id="sizeLabel">new stones</span>
+    <div class="choices four" id="size" role="group" aria-labelledby="sizeLabel"></div>
+  </div>
+
+  <div class="field">
+    <span class="label" id="mossLabel">moss on new stones</span>
+    <div class="choices two" id="moss" role="group" aria-labelledby="mossLabel"></div>
+  </div>
+
+  <div class="field">
+    <label for="volume">volume <output id="volumeOut" for="volume">6</output></label>
+    <input type="range" id="volume" min="1" max="10" step="1" value="6">
+  </div>
+
+  <div class="actions">
+    <button class="textbtn" id="reRake">rake straight</button>
+    <button class="textbtn" id="shuffle">shuffle stones</button>
+    <button class="textbtn wide" id="clearStones">clear all stones</button>
+  </div>
+
+  <p class="keys">1 rake &nbsp; 2 stone &nbsp; 3 smooth &nbsp; 4 rings<br>ctrl+z undo &nbsp; m sound &nbsp; s settings<br>enter full screen<br>stone tool: scroll to resize<br>right-click a stone to remove it</p>
+</section>
+
+<script>
+(() => {
+  // ---------------- constants ----------------
+  const SAND = {
+    pale: [0xA8987A, 0xC2B396, 0xD6C9AC, 0xE6DBC2, 0xF2EAD6],
+    warm: [0x9C8358, 0xB59C70, 0xC9B286, 0xDAC59C, 0xE8D8B4],
+    grey: [0x86837C, 0x9C9992, 0xB1AEA7, 0xC5C2BB, 0xD8D5CF],
+    moon: [0x5A6276, 0x6E7890, 0x838EA8, 0x99A4BE, 0xB3BDD3],
+  };
+  const SAND_NAMES = ["pale", "warm", "grey", "moon"];
+  const TIMES = ["day", "dusk", "night"];
+  const SIZES = [["small", [4, 6]], ["medium", [7, 10]], ["large", [11, 15]], ["mixed", [4, 14]]];
+  const TONES = [0x8C877C, 0x9A9384, 0x7E7A72, 0x6F6B66, 0x857A6B, 0x767C86];
+  const S = 4;            // groove spacing in game pixels
+  const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+  const SAVE_KEY = "zen-garden-v1";
+
+  const rand = (a, b) => a + Math.random() * (b - a);
+  const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+  const dither = (x, y) => (BAYER[(y & 3) * 4 + (x & 3)] + 0.5) / 16;
+  function mix(c1, c2, a) {
+    const ia = 255 - a;
+    return ((((c1 >> 16) & 255) * ia + ((c2 >> 16) & 255) * a) / 255 << 16) |
+      ((((c1 >> 8) & 255) * ia + ((c2 >> 8) & 255) * a) / 255 << 8) |
+      (((c1 & 255) * ia + (c2 & 255) * a) / 255 | 0);
+  }
+
+  // ---------------- settings ----------------
+  const DEFAULTS = { sand: "pale", time: "day", tines: 4, depth: 3, size: 3, moss: 1, sound: 0, volume: 6 };
+  let prefs = { ...DEFAULTS };
+  let saved = null;
+  try {
+    saved = JSON.parse(localStorage.getItem(SAVE_KEY) || "null");
+    if (saved && saved.prefs) prefs = { ...DEFAULTS, ...saved.prefs };
+  } catch (e) { saved = null; }
+
+  // ---------------- canvas ----------------
+  const canvas = document.getElementById("garden");
+  const ctx = canvas.getContext("2d");
+  let W = 0, H = 0, scale = 4;
+  let h, grain, mask, sandRGB, px, img, out32, lightR, lightG, lightB;
+  let rocks = [];
+  let dirty = true, t = 0;
+
+  function set(x, y, c) {
+    x |= 0; y |= 0;
+    if (x >= 0 && y >= 0 && x < W && y < H) px[y * W + x] = c;
+  }
+  function blend(x, y, c, a) {
+    x = Math.floor(x); y = Math.floor(y);
+    if (x < 0 || y < 0 || x >= W || y >= H || a <= 0) return;
+    const i = y * W + x;
+    px[i] = a >= 255 ? c : mix(px[i], c, a | 0);
+  }
+  function ring(cx, cy, r, c, a, squash = 1) {
+    const steps = Math.max(16, (r * 7) | 0);
+    let lx = NaN, ly = NaN;
+    for (let i = 0; i < steps; i++) {
+      const ang = (i * Math.PI * 2) / steps;
+      const x = Math.floor(cx + Math.cos(ang) * r), y = Math.floor(cy + Math.sin(ang) * r * squash);
+      if (x === lx && y === ly) continue;
+      blend(x, y, c, a);
+      lx = x; ly = y;
+    }
+  }
+
+  // ---------------- stones ----------------
+  function newRock(x, y, size) {
+    const [a, b] = SIZES[prefs.size][1];
+    const rx = size || rand(a, b);
+    return {
+      x, y, rx, ry: rx * rand(0.66, 0.84),
+      tone: TONES[(Math.random() * TONES.length) | 0],
+      moss: prefs.moss && Math.random() < 0.75,
+      ph: rand(0, 6.28),
+    };
+  }
+  // shape: an ellipse with a few gentle bumps, so every stone is different
+  function rockR(r, x, y) {
+    const dx = (x - r.x) / r.rx, dy = (y - r.y) / r.ry;
+    const ang = Math.atan2(dy, dx);
+    const bump = 1 + 0.12 * Math.sin(ang * 3 + r.ph) + 0.07 * Math.sin(ang * 5 + r.ph * 2);
+    return Math.sqrt(dx * dx + dy * dy) / bump;
+  }
+  function rebuildMask() {
+    mask.fill(0);
+    rocks.forEach((r, n) => {
+      for (let y = Math.floor(r.y - r.ry * 1.3); y <= Math.ceil(r.y + r.ry * 1.3); y++)
+        for (let x = Math.floor(r.x - r.rx * 1.3); x <= Math.ceil(r.x + r.rx * 1.3); x++)
+          if (x >= 0 && y >= 0 && x < W && y < H && rockR(r, x + 0.5, y + 0.5) < 1) mask[y * W + x] = n + 1;
+    });
+  }
+  function rockAt(x, y) {
+    for (let i = rocks.length - 1; i >= 0; i--) if (rockR(rocks[i], x, y) < 1.15) return rocks[i];
+    return null;
+  }
+  /** Sand under a newly placed stone is pressed flat. */
+  function pressUnder(r) {
+    for (let y = Math.floor(r.y - r.ry * 1.3); y <= Math.ceil(r.y + r.ry * 1.3); y++)
+      for (let x = Math.floor(r.x - r.rx * 1.3); x <= Math.ceil(r.x + r.rx * 1.3); x++) {
+        if (x < 0 || y < 0 || x >= W || y >= H) continue;
+        const d = rockR(r, x + 0.5, y + 0.5);
+        if (d < 1.05) h[y * W + x] = 0;
+        else if (d < 1.2) h[y * W + x] = h[y * W + x] * 0.5 + 0.35; // a little pushed-up rim
+      }
+  }
+
+  // ---------------- sand shaping ----------------
+  const amp = () => 0.55 + prefs.depth * 0.22;
+  function straightLines() {
+    const a = amp();
+    for (let y = 0; y < H; y++) {
+      const v = -Math.cos((2 * Math.PI * (y + 0.5)) / S) * a;
+      for (let x = 0; x < W; x++) h[y * W + x] = v;
+    }
+  }
+  function rakeRings(cx, cy, r0, rings, squash) {
+    const a = amp(), outer = r0 + rings * S;
+    for (let y = Math.floor(cy - outer / squash - 1); y <= cy + outer / squash + 1; y++)
+      for (let x = Math.floor(cx - outer - 1); x <= cx + outer + 1; x++) {
+        if (x < 0 || y < 0 || x >= W || y >= H) continue;
+        const i = y * W + x;
+        if (mask[i]) continue;
+        const d = Math.hypot(x + 0.5 - cx, (y + 0.5 - cy) / squash);
+        if (d < r0 - 0.5 || d > outer + 0.5) continue;
+        const v = -Math.cos((2 * Math.PI * (d - r0)) / S) * a;
+        h[i] = d > outer - 0.5 || d < r0 ? (h[i] + v) / 2 : v;
+      }
+    dirty = true;
+  }
+  function ringsAroundRock(r) {
+    rakeRings(r.x, r.y, r.rx * 1.15 + 2.5, Math.max(3, prefs.tines), r.ry / r.rx);
+  }
+  // one stamp of the rake: tines across the stroke at point (x, y), normal (nx, ny)
+  function rakeStamp(x, y, nx, ny) {
+    const a = amp(), half = (prefs.tines * S) / 2;
+    for (let o = -half; o <= half; o += 0.5) {
+      const qx = Math.floor(x + nx * o), qy = Math.floor(y + ny * o);
+      if (qx < 0 || qy < 0 || qx >= W || qy >= H) continue;
+      const i = qy * W + qx;
+      if (mask[i]) continue;
+      const v = -Math.cos((2 * Math.PI * (o + half)) / S) * a;
+      h[i] = Math.abs(o) > half - 1 ? (h[i] + v) / 2 : v;
+    }
+  }
+  function smoothStamp(x, y) {
+    const r = 4 + prefs.tines * 0.6;
+    for (let yy = Math.floor(y - r); yy <= y + r; yy++)
+      for (let xx = Math.floor(x - r); xx <= x + r; xx++) {
+        if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue;
+        const d = Math.hypot(xx + 0.5 - x, yy + 0.5 - y);
+        if (d > r) continue;
+        h[yy * W + xx] *= 1 - 0.35 * (1 - d / r);
+      }
+  }
+
+  // ---------------- lighting & rendering ----------------
+  function buildLight() {
+    lightR = new Float32Array(W * H); lightG = new Float32Array(W * H); lightB = new Float32Array(W * H);
+    for (let y = 0; y < H; y++)
+      for (let x = 0; x < W; x++) {
+        const i = y * W + x;
+        const vx = (x + 0.5 - W / 2) / (W / 2), vy = (y + 0.5 - H / 2) / (H / 2);
+        const vig = 1 - 0.16 * Math.pow(vx * vx + vy * vy, 1.5);
+        let r = vig, g = vig, b = vig;
+        if (prefs.time === "dusk") {
+          const sun = Math.exp(-Math.pow((x / W) / 0.9, 2) - Math.pow((y / H - 0.35) / 1.2, 2));
+          const k = (0.62 + 0.42 * sun) * vig;
+          r = k * 1.08; g = k * 0.9; b = k * 0.74;
+        } else if (prefs.time === "night") {
+          const moon = Math.exp(-(Math.pow((x - W * 0.82) / (W * 0.36), 2) + Math.pow((y - H * 0.05) / (H * 0.44), 2)));
+          const k = (0.5 + 0.48 * moon) * vig;
+          r = k * 0.84; g = k * 0.92; b = k * 1.12;
+        }
+        lightR[i] = r; lightG[i] = g; lightB[i] = b;
+      }
+  }
+
+  function computeSand() {
+    const pal = SAND[prefs.sand], n = pal.length - 1;
+    for (let y = 0; y < H; y++)
+      for (let x = 0; x < W; x++) {
+        const i = y * W + x;
+        const j = (y > 0 ? y - 1 : 0) * W + (x > 0 ? x - 1 : 0);
+        // light from the top-left: brighter where the sand faces it
+        const level = 0.5 + (h[i] + grain[i] - h[j] - grain[j]) * 0.24;
+        const q = clamp(Math.floor(level * n + dither(x, y) - 0.5 + 0.5), 0, n);
+        sandRGB[i] = pal[q];
+      }
+    dirty = false;
+  }
+
+  function drawRocks() {
+    const night = prefs.time === "night";
+    // shadows
+    for (const r of rocks) {
+      const sx = r.x + r.rx * 0.35, sy = r.y + r.ry * 0.45;
+      for (let y = Math.floor(sy - r.ry * 1.1); y <= sy + r.ry * 1.1; y++)
+        for (let x = Math.floor(sx - r.rx * 1.1); x <= sx + r.rx * 1.1; x++) {
+          const dx = (x + 0.5 - sx) / (r.rx * 1.05), dy = (y + 0.5 - sy) / r.ry;
+          if (dx * dx + dy * dy < 1) blend(x, y, 0x1A140E, 70);
+        }
+    }
+    // moss around the base
+    for (const r of rocks) {
+      if (!r.moss) continue;
+      const mc = night ? 0x3E5E2E : 0x6E8B3D, ml = night ? 0x55703A : 0x8AA64C;
+      for (let y = Math.floor(r.y - r.ry - 3); y <= r.y + r.ry + 4; y++)
+        for (let x = Math.floor(r.x - r.rx - 4); x <= r.x + r.rx + 4; x++) {
+          const lx = x - Math.floor(r.x), ly = y - Math.floor(r.y);
+          const dx = (x + 0.5 - r.x) / (r.rx + 3.5), dy = (y + 0.5 - r.y - 1) / (r.ry + 2.5);
+          const d = dx * dx + dy * dy;
+          if (d >= 1) continue;
+          if (Math.sin(lx * 1.7 + ly * 2.3 + r.ph) + dither(lx & 3, ly & 3) > 0.2 + d * 0.9)
+            set(x, y, ((lx + ly) % 3 + 3) % 3 === 0 ? ml : mc);
+        }
+    }
+    // stones, back to front
+    const order = rocks.slice().sort((a, b) => a.y - b.y);
+    for (const r of order) {
+      const c0 = r.tone;
+      const shades = [mix(c0, 0, 115), mix(c0, 0, 64), c0, mix(c0, 0xFFFFFF, 60)];
+      for (let y = Math.floor(r.y - r.ry * 1.3); y <= r.y + r.ry * 1.3; y++)
+        for (let x = Math.floor(r.x - r.rx * 1.3); x <= r.x + r.rx * 1.3; x++) {
+          if (x < 0 || y < 0 || x >= W || y >= H) continue;
+          const d = rockR(r, x + 0.5, y + 0.5);
+          if (d >= 1) continue;
+          const dx = (x + 0.5 - r.x) / r.rx, dy = (y + 0.5 - r.y) / r.ry;
+          const lit = -(dx * 0.6 + dy * 0.8) * 0.9 + (1 - d) * 0.4;
+          let c = shades[clamp(Math.floor((lit + 0.9) * 2 + dither(x - Math.floor(r.x), y - Math.floor(r.y))), 0, 3)];
+          if (d > 0.86 && dy > 0) c = mix(c0, 0, 140);
+          const lx = x - Math.floor(r.x), ly = y - Math.floor(r.y);
+          if (((lx * 7 + ly * 13 + Math.floor(r.ph * 10)) % 23 + 23) % 23 === 0) c = mix(c, 0x9A9A70, 60);
+          px[y * W + x] = c;
+        }
+    }
+  }
+
+  // ambient: cloud shadows by day, fireflies by night
+  const clouds = [{ x: 0, y: 0, rx: 0, ry: 0, v: 0 }, { x: 0, y: 0, rx: 0, ry: 0, v: 0 }];
+  function resetClouds() {
+    clouds.forEach((c, i) => {
+      c.rx = W * rand(0.3, 0.45); c.ry = H * rand(0.25, 0.4);
+      c.x = i === 0 ? W * 0.2 : -W * 0.6; c.y = rand(0, H); c.v = rand(1.2, 2.2);
+    });
+  }
+  let flies = [];
+
+  let cursor = { on: false, x: 0, y: 0, dx: 1, dy: 0 };
+  let ghostSize = 0;
+  let hoverRock = null;
+
+  function drawCursor() {
+    if (!cursor.on || !panelClosed()) return;
+    const dark = prefs.time === "night" ? 0xDDE6F5 : 0x3A2E22;
+    const x = cursor.x, y = cursor.y;
+    if (tool === "rake") {
+      const nx = -cursor.dy, ny = cursor.dx, half = (prefs.tines * S) / 2;
+      for (let o = -half + S / 2; o <= half - S / 2 + 0.01; o += S) {
+        blend(x + nx * o, y + ny * o, dark, 230);
+        blend(x + nx * o - cursor.dx, y + ny * o - cursor.dy, dark, 120);
+      }
+      for (let o = -half + S / 2; o <= half - S / 2; o += 0.5) blend(x + nx * o - cursor.dx * 2, y + ny * o - cursor.dy * 2, dark, 150);
+      for (let k = 3; k < 9; k++) blend(x - cursor.dx * k, y - cursor.dy * k, 0x8A6A44, 220);
+    } else if (tool === "smooth") {
+      ring(x, y, 4 + prefs.tines * 0.6, dark, 150);
+    } else if (tool === "stone") {
+      if (hoverRock) {
+        ring(hoverRock.x, hoverRock.y, hoverRock.rx * 1.2 + 1, dark, 170, hoverRock.ry / hoverRock.rx);
+      } else {
+        const rx = ghostSize, ry = rx * 0.75;
+        for (let yy = Math.floor(y - ry); yy <= y + ry; yy++)
+          for (let xx = Math.floor(x - rx); xx <= x + rx; xx++) {
+            const dx = (xx + 0.5 - x) / rx, dy = (yy + 0.5 - y) / ry, d = dx * dx + dy * dy;
+            if (d < 1) blend(xx, yy, prefs.time === "night" ? 0xDDE6F5 : 0xFFFFFF, d > 0.72 ? 190 : 95);
+          }
+      }
+    } else if (tool === "rings") {
+      if (hoverRock) {
+        const r0 = hoverRock.rx * 1.15 + 2.5, sq = hoverRock.ry / hoverRock.rx;
+        ring(hoverRock.x, hoverRock.y, r0, dark, 120, sq);
+        ring(hoverRock.x, hoverRock.y, r0 + Math.max(3, prefs.tines) * S, dark, 90, sq);
+      } else {
+        ring(x, y, 2, dark, 160);
+        ring(x, y, 2 + Math.max(3, prefs.tines) * S, dark, 90);
+      }
+    }
+  }
+
+  function render() {
+    if (dirty) computeSand();
+    px.set(sandRGB);
+    drawRocks();
+    if (prefs.time === "night") {
+      for (const f of flies) {
+        const glow = 0.5 + 0.5 * Math.sin(t * 1.7 + f[2] * 3);
+        for (let yy = -2; yy <= 2; yy++) for (let xx = -2; xx <= 2; xx++)
+          if (xx * xx + yy * yy <= 5) blend(f[0] + xx, f[1] + yy, 0xD8F07A, 30 * glow);
+        blend(f[0], f[1], 0xF2FFB0, 60 + 195 * glow);
+      }
+    }
+    drawCursor();
+    // light, tint and drifting cloud shadows, straight into the canvas buffer
+    const day = prefs.time === "day";
+    for (let y = 0; y < H; y++)
+      for (let x = 0; x < W; x++) {
+        const i = y * W + x;
+        let k = 1;
+        if (day) {
+          for (const c of clouds) {
+            const dx = (x - c.x) / c.rx, dy = (y - c.y) / c.ry, d = dx * dx + dy * dy;
+            if (d < 1 && (1 - d) * 1.6 + dither(x, y) * 0.5 > 0.55) k *= 0.9;
+          }
+        }
+        const c = px[i];
+        const r = ((c >> 16) & 255) * lightR[i] * k, g = ((c >> 8) & 255) * lightG[i] * k, b = (c & 255) * lightB[i] * k;
+        out32[i] = 0xFF000000 | (Math.min(255, b) << 16) | (Math.min(255, g) << 8) | Math.min(255, r);
+      }
+    ctx.putImageData(img, 0, 0);
+  }
+
+  function update(dt) {
+    t += dt;
+    if (prefs.time === "day") {
+      for (const c of clouds) {
+        c.x += c.v * dt;
+        if (c.x - c.rx > W) { c.x = -c.rx * 1.2; c.y = rand(0, H); c.rx = W * rand(0.3, 0.45); c.ry = H * rand(0.25, 0.4); }
+      }
+    } else if (prefs.time === "night") {
+      for (const f of flies) {
+        f[2] += dt * f[3];
+        f[0] += Math.cos(f[2]) * dt * 3;
+        f[1] += Math.sin(f[2] * 1.3) * dt * 2.5;
+        f[0] = (f[0] + W) % W; f[1] = (f[1] + H) % H;
+      }
+    }
+    updateSound(dt);
+  }
+
+  // ---------------- garden setup, save & load ----------------
+  function allocate() {
+    h = new Float32Array(W * H);
+    grain = new Float32Array(W * H);
+    for (let i = 0; i < grain.length; i++) grain[i] = Math.random() * 0.25;
+    mask = new Uint8Array(W * H);
+    sandRGB = new Int32Array(W * H);
+    px = new Int32Array(W * H);
+    img = ctx.createImageData(W, H);
+    out32 = new Uint32Array(img.data.buffer);
+    flies = [];
+    for (let i = 0; i < 5; i++) flies.push([rand(0, W), rand(0, H), rand(0, 6.28), rand(0.3, 0.8)]);
+    resetClouds();
+    buildLight();
+  }
+
+  function defaultGarden() {
+    straightLines();
+    rocks = [];
+    const add = (fx, fy, size, moss) => {
+      const r = newRock(W * fx, H * fy, size);
+      r.moss = moss;
+      rocks.push(r);
+      return r;
+    };
+    const big = add(0.28, 0.39, 13, true), mid = add(0.37, 0.49, 7, true), small = add(0.22, 0.5, 5, false), lone = add(0.76, 0.65, 10, true);
+    rebuildMask();
+    [big, mid, small, lone].forEach((r) => { pressUnder(r); ringsAroundRock(r); });
+    rebuildMask();
+    dirty = true;
+  }
+
+  function shuffleStones() {
+    pushUndo();
+    rocks = [];
+    rebuildMask();
+    straightLines();
+    const n = 3 + ((Math.random() * 3) | 0);
+    for (let k = 0; k < n; k++) {
+      for (let tries = 0; tries < 30; tries++) {
+        const r = newRock(rand(W * 0.12, W * 0.88), rand(H * 0.15, H * 0.8));
+        if (rocks.every((o) => Math.hypot(o.x - r.x, o.y - r.y) > o.rx + r.rx + 10)) { rocks.push(r); break; }
+      }
+    }
+    rebuildMask();
+    rocks.forEach((r) => { pressUnder(r); ringsAroundRock(r); });
+    rebuildMask();
+    dirty = true;
+    sfx.stone();
+    scheduleSave();
+  }
+
+  function encodeH() {
+    const b = new Int8Array(W * H);
+    for (let i = 0; i < b.length; i++) b[i] = clamp(Math.round(h[i] * 50), -127, 127);
+    let s = "";
+    const u = new Uint8Array(b.buffer);
+    for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000));
+    return btoa(s);
+  }
+  function decodeH(str, w0, h0) {
+    const bin = atob(str), b = new Int8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) b[i] = (bin.charCodeAt(i) << 24) >> 24;
+    for (let y = 0; y < H; y++)
+      for (let x = 0; x < W; x++) {
+        const sx = Math.min(w0 - 1, Math.floor((x * w0) / W)), sy = Math.min(h0 - 1, Math.floor((y * h0) / H));
+        h[y * W + x] = b[sy * w0 + sx] / 50;
+      }
+  }
+  let saveTimer = 0;
+  function scheduleSave() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveNow, 600);
+  }
+  function saveNow() {
+    try {
+      localStorage.setItem(SAVE_KEY, JSON.stringify({ prefs, w: W, h: H, sand: encodeH(), rocks }));
+    } catch (e) { /* storage full or blocked: the garden just won't be remembered */ }
+  }
+  function savePrefsOnly() { scheduleSave(); }
+
+  function resizeTo(newW, newH) {
+    const oldH = h, oldW = W, oldHt = H, oldRocks = rocks;
+    W = newW; H = newH;
+    allocate();
+    if (oldH) {
+      for (let y = 0; y < H; y++)
+        for (let x = 0; x < W; x++) {
+          const sx = Math.min(oldW - 1, Math.floor((x * oldW) / W)), sy = Math.min(oldHt - 1, Math.floor((y * oldHt) / H));
+          h[y * W + x] = oldH[sy * oldW + sx];
+        }
+      rocks = oldRocks.map((r) => ({ ...r, x: (r.x * W) / oldW, y: (r.y * H) / oldHt }));
+      rebuildMask();
+      undoStack.length = 0;
+      refreshUndo();
+    }
+    dirty = true;
+  }
+
+  function layout(first) {
+    const w = window.innerWidth, hh = window.innerHeight;
+    const s = Math.max(2, Math.round(Math.min(w, hh) / 150));
+    const gw = Math.ceil(w / s), gh = Math.ceil(hh / s);
+    if (!first && gw === W && gh === H && s === scale) return;
+    scale = s;
+    canvas.width = gw; canvas.height = gh;
+    canvas.style.width = gw * s + "px"; canvas.style.height = gh * s + "px";
+    if (first) {
+      W = gw; H = gh;
+      allocate();
+      let loaded = false;
+      if (saved && saved.sand && saved.w && saved.h) {
+        try {
+          decodeH(saved.sand, saved.w, saved.h);
+          rocks = (saved.rocks || []).map((r) => ({ ...r, x: (r.x * W) / saved.w, y: (r.y * H) / saved.h }));
+          rebuildMask();
+          loaded = true;
+        } catch (e) { loaded = false; }
+      }
+      if (!loaded) defaultGarden();
+      dirty = true;
+    } else {
+      resizeTo(gw, gh);
+    }
+    ghostSize = ghostSize || nextGhost();
+  }
+
+  // ---------------- undo ----------------
+  const undoStack = [];
+  const undoBtn = document.getElementById("undoBtn");
+  function refreshUndo() { undoBtn.disabled = undoStack.length === 0; }
+  function pushUndo() {
+    undoStack.push({ h: h.slice(), rocks: rocks.map((r) => ({ ...r })) });
+    if (undoStack.length > 25) undoStack.shift();
+    refreshUndo();
+  }
+  function undo() {
+    const s = undoStack.pop();
+    if (!s) return;
+    h.set(s.h);
+    rocks = s.rocks;
+    rebuildMask();
+    dirty = true;
+    refreshUndo();
+    scheduleSave();
+    say("undone");
+  }
+
+  // ---------------- sound (made in the browser) ----------------
+  const audio = { ctx: null, master: null, scrape: null, scrapeGain: null, scrapeFilter: null, white: null };
+  const soundOn = () => !!(prefs.sound && audio.ctx && audio.ctx.state === "running");
+  function audioInit() {
+    if (audio.ctx) return true;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return false;
+    const c = new AC();
+    audio.ctx = c;
+    audio.master = c.createGain();
+    audio.master.gain.value = 0;
+    audio.master.connect(c.destination);
+    const len = c.sampleRate * 3;
+    const wb = c.createBuffer(1, len, c.sampleRate), bb = c.createBuffer(1, len, c.sampleRate);
+    const wd = wb.getChannelData(0), bd = bb.getChannelData(0);
+    let last = 0;
+    for (let i = 0; i < len; i++) {
+      const w = Math.random() * 2 - 1;
+      wd[i] = w;
+      last = (last + 0.02 * w) / 1.02;
+      bd[i] = last * 3.5;
+    }
+    audio.white = wb;
+    const loop = (buf) => { const s = c.createBufferSource(); s.buffer = buf; s.loop = true; s.start(); return s; };
+    // a soft breeze
+    const lp = c.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 300;
+    const wind = c.createGain(); wind.gain.value = 0.16;
+    const lfo = c.createOscillator(), lfoG = c.createGain();
+    lfo.frequency.value = 0.05; lfoG.gain.value = 0.08;
+    lfo.connect(lfoG).connect(wind.gain); lfo.start();
+    loop(bb).connect(lp).connect(wind).connect(audio.master);
+    // the rake scraping through sand: gated noise, louder the faster you rake
+    audio.scrapeFilter = c.createBiquadFilter(); audio.scrapeFilter.type = "bandpass";
+    audio.scrapeFilter.frequency.value = 2600; audio.scrapeFilter.Q.value = 0.6;
+    audio.scrapeGain = c.createGain(); audio.scrapeGain.gain.value = 0;
+    loop(wb).connect(audio.scrapeFilter).connect(audio.scrapeGain).connect(audio.master);
+    return true;
+  }
+  function applyVolume() {
+    if (!audio.ctx) return;
+    audio.master.gain.setTargetAtTime(prefs.sound ? Math.pow(prefs.volume / 10, 2) * 0.9 : 0, audio.ctx.currentTime, 0.25);
+  }
+  function setSound(on) {
+    prefs.sound = on ? 1 : 0;
+    savePrefsOnly();
+    if (on && audioInit()) audio.ctx.resume().then(applyVolume).catch(() => {});
+    applyVolume();
+    soundBtn.setAttribute("aria-pressed", String(!!on));
+    soundBtn.setAttribute("aria-label", on ? "Sound off" : "Sound on");
+  }
+  function tone(f0, f1, dur, gain, type = "sine", when = 0, decay = 0.08) {
+    if (!soundOn()) return;
+    const c = audio.ctx, t0 = c.currentTime + when;
+    const o = c.createOscillator(), g = c.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(f0, t0);
+    o.frequency.exponentialRampToValueAtTime(f1, t0 + dur);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(gain, t0 + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur + decay);
+    o.connect(g).connect(audio.master);
+    o.start(t0); o.stop(t0 + dur + decay + 0.05);
+  }
+  function noise(freq, q, dur, gain, when = 0) {
+    if (!soundOn()) return;
+    const c = audio.ctx, t0 = c.currentTime + when;
+    const s = c.createBufferSource(); s.buffer = audio.white;
+    const bp = c.createBiquadFilter(); bp.type = "bandpass"; bp.frequency.value = freq; bp.Q.value = q;
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(gain, t0 + 0.04);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    s.connect(bp).connect(g).connect(audio.master);
+    s.start(t0, Math.random() * 2); s.stop(t0 + dur + 0.05);
+  }
+  function scrape(level, freq) {
+    if (!audio.ctx) return;
+    const now = audio.ctx.currentTime;
+    if (freq) audio.scrapeFilter.frequency.setTargetAtTime(freq, now, 0.05);
+    audio.scrapeGain.gain.setTargetAtTime(soundOn() ? level : 0, now, 0.06);
+  }
+  const PENTA = [523.25, 587.33, 659.25, 783.99, 880, 1046.5];
+  const sfx = {
+    stone: () => { tone(110, 52, 0.18, 0.5); noise(3200, 1.2, 0.07, 0.12); noise(900, 0.8, 0.35, 0.08, 0.02); },
+    lift: () => noise(2200, 1, 0.12, 0.05),
+    rings: () => noise(2600, 0.6, 0.7, 0.12),
+    chime: () => {
+      const n = 1 + ((Math.random() * 3) | 0);
+      for (let i = 0; i < n; i++) {
+        const f = PENTA[(Math.random() * PENTA.length) | 0], w = i * rand(0.25, 0.6);
+        tone(f, f, 0.01, 0.05, "sine", w, 3.2);
+        tone(f * 2.76, f * 2.76, 0.01, 0.012, "sine", w, 1.6);
+      }
+    },
+    bird: () => { const b = rand(2400, 3200); for (let i = 0; i < 3; i++) tone(b, b * 1.35, 0.06, 0.03, "sine", i * 0.11); },
+    cricket: () => { for (let i = 0; i < 3; i++) tone(4300, 4200, 0.025, 0.018, "sine", i * 0.045); },
+  };
+  let chimeTimer = rand(8, 20), birdTimer = rand(6, 16), cricketTimer = 2;
+  function updateSound(dt) {
+    if (!soundOn()) return;
+    if ((chimeTimer -= dt) <= 0) { chimeTimer = rand(25, 60); sfx.chime(); }
+    if (prefs.time === "night") {
+      if ((cricketTimer -= dt) <= 0) { cricketTimer = rand(0.8, 3.5); sfx.cricket(); }
+    } else if ((birdTimer -= dt) <= 0) { birdTimer = rand(15, 40); sfx.bird(); }
+  }
+  document.addEventListener("visibilitychange", () => {
+    if (!audio.ctx) return;
+    if (document.hidden) audio.ctx.suspend().catch(() => {});
+    else if (prefs.sound) audio.ctx.resume().catch(() => {});
+  });
+
+  // ---------------- UI ----------------
+  const body = document.body;
+  const panel = document.getElementById("panel");
+  const toast = document.getElementById("toast");
+  const hint = document.getElementById("hint");
+  const settingsBtn = document.getElementById("settingsBtn");
+  const soundBtn = document.getElementById("soundBtn");
+  const fsBtn = document.getElementById("fsBtn");
+  const toolBtns = [...document.querySelectorAll(".tool[data-tool]")];
+  let tool = "rake";
+  let idleTimer = 0, toastTimer = 0;
+  const panelClosed = () => panel.hidden;
+
+  function wake() {
+    body.classList.remove("idle");
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => { if (panel.hidden && !dragging) body.classList.add("idle"); }, 5000);
+  }
+  function say(msg) {
+    toast.textContent = msg;
+    toast.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove("show"), 1300);
+  }
+  let hintShown = !saved;
+  if (!hintShown) hint.classList.add("gone");
+  function dismissHint() {
+    if (!hintShown) return;
+    hintShown = false;
+    hint.classList.add("gone");
+  }
+  setTimeout(dismissHint, 12000);
+
+  function nextGhost() {
+    const [a, b] = SIZES[prefs.size][1];
+    return rand(a, b);
+  }
+  function setTool(name) {
+    tool = name;
+    toolBtns.forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.tool === name)));
+    if (name === "stone") ghostSize = nextGhost();
+    wake();
+  }
+  toolBtns.forEach((b) => b.addEventListener("click", () => setTool(b.dataset.tool)));
+  undoBtn.addEventListener("click", () => { undo(); wake(); });
+
+  function openPanel(open) {
+    panel.hidden = !open;
+    settingsBtn.setAttribute("aria-expanded", String(open));
+    if (open) panel.querySelector(".choice").focus({ preventScroll: true });
+    wake();
+  }
+  settingsBtn.addEventListener("click", () => openPanel(panel.hidden));
+  document.getElementById("closeBtn").addEventListener("click", () => { openPanel(false); settingsBtn.focus(); });
+
+  // settings controls
+  function choiceGroup(id, items, current, onPick, swatch) {
+    const box = document.getElementById(id);
+    items.forEach((item, i) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "choice";
+      if (swatch) {
+        const sw = document.createElement("div");
+        sw.className = "swatch";
+        const pal = SAND[item];
+        const hx = (c) => "#" + c.toString(16).padStart(6, "0");
+        sw.style.background = `repeating-linear-gradient(180deg, ${hx(pal[3])} 0 3px, ${hx(pal[1])} 3px 5px)`;
+        b.append(sw);
+      }
+      b.append(document.createTextNode(Array.isArray(item) ? item[0] : item));
+      b.addEventListener("click", () => { onPick(i, item); refreshControls(); });
+      box.append(b);
+    });
+  }
+  choiceGroup("sand", SAND_NAMES, null, (i, n) => { prefs.sand = n; dirty = true; savePrefsOnly(); }, true);
+  choiceGroup("time", TIMES, null, (i, n) => {
+    prefs.time = n;
+    // moonlit sand suits the night; switch back to pale when the sun comes up
+    if (n === "night" && prefs.sand === "pale") prefs.sand = "moon";
+    if (n !== "night" && prefs.sand === "moon") prefs.sand = "pale";
+    dirty = true; buildLight(); applyTheme(); savePrefsOnly();
+  });
+  choiceGroup("size", SIZES, null, (i) => { prefs.size = i; ghostSize = nextGhost(); savePrefsOnly(); });
+  choiceGroup("moss", ["off", "on"], null, (i) => { prefs.moss = i; savePrefsOnly(); });
+  const tines = document.getElementById("tines"), tinesOut = document.getElementById("tinesOut");
+  const depth = document.getElementById("depth"), depthOut = document.getElementById("depthOut");
+  const volume = document.getElementById("volume"), volumeOut = document.getElementById("volumeOut");
+  tines.addEventListener("input", () => { prefs.tines = +tines.value; tinesOut.textContent = tines.value + " tines"; savePrefsOnly(); });
+  depth.addEventListener("input", () => { prefs.depth = +depth.value; depthOut.textContent = depth.value; savePrefsOnly(); });
+  volume.addEventListener("input", () => {
+    prefs.volume = +volume.value; volumeOut.textContent = volume.value; applyVolume();
+    if (!prefs.sound) setSound(1);
+    sfx.chime();
+    savePrefsOnly();
+  });
+  document.getElementById("reRake").addEventListener("click", () => {
+    pushUndo(); straightLines(); rocks.forEach((r) => { pressUnder(r); ringsAroundRock(r); }); dirty = true;
+    noise(2600, 0.6, 1.2, 0.14); scheduleSave(); say("raked straight");
+  });
+  document.getElementById("shuffle").addEventListener("click", () => { shuffleStones(); say("new stones"); });
+  document.getElementById("clearStones").addEventListener("click", () => {
+    if (!rocks.length) return;
+    pushUndo(); rocks = []; rebuildMask(); dirty = true; scheduleSave(); say("stones cleared, ctrl+z to undo");
+  });
+
+  function refreshControls() {
+    const mark = (id, fn) => [...document.getElementById(id).children].forEach((b, i) => b.setAttribute("aria-pressed", String(fn(i))));
+    mark("sand", (i) => SAND_NAMES[i] === prefs.sand);
+    mark("time", (i) => TIMES[i] === prefs.time);
+    mark("size", (i) => i === prefs.size);
+    mark("moss", (i) => i === (prefs.moss ? 1 : 0));
+    tines.value = prefs.tines; tinesOut.textContent = prefs.tines + " tines";
+    depth.value = prefs.depth; depthOut.textContent = prefs.depth;
+    volume.value = prefs.volume; volumeOut.textContent = prefs.volume;
+  }
+  function applyTheme() { body.classList.toggle("night", prefs.time === "night"); }
+
+  soundBtn.addEventListener("click", () => { setSound(!prefs.sound); say(prefs.sound ? "sound on" : "sound off"); wake(); });
+  soundBtn.setAttribute("aria-pressed", String(!!prefs.sound));
+  soundBtn.setAttribute("aria-label", prefs.sound ? "Sound off" : "Sound on");
+
+  // full screen
+  const root = document.documentElement;
+  const fsElement = () => document.fullscreenElement || document.webkitFullscreenElement || null;
+  const canFullscreen = !!(document.fullscreenEnabled || document.webkitFullscreenEnabled) && !!(root.requestFullscreen || root.webkitRequestFullscreen);
+  fsBtn.hidden = !canFullscreen;
+  function syncFullscreen() {
+    const on = !!fsElement();
+    fsBtn.setAttribute("aria-pressed", String(on));
+    fsBtn.setAttribute("aria-label", on ? "Exit full screen" : "Full screen");
+  }
+  function toggleFullscreen() {
+    wake();
+    try {
+      if (fsElement()) (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+      else {
+        const r = (root.requestFullscreen || root.webkitRequestFullscreen).call(root, { navigationUI: "hide" });
+        if (r && r.catch) r.catch(() => say("full screen isn't available here"));
+      }
+    } catch (e) { say("full screen isn't available here"); }
+  }
+  fsBtn.addEventListener("click", toggleFullscreen);
+  document.addEventListener("fullscreenchange", syncFullscreen);
+  document.addEventListener("webkitfullscreenchange", syncFullscreen);
+
+  // ---------------- pointer input ----------------
+  let dragging = false, dragRock = null, dragOff = [0, 0], last = null, moved = 0, lastMoveT = 0;
+  const toGame = (e) => [e.clientX / scale, e.clientY / scale];
+
+  canvas.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    const [x, y] = toGame(e);
+    const r = rockAt(x, y);
+    if (r) {
+      pushUndo();
+      rocks.splice(rocks.indexOf(r), 1);
+      rebuildMask();
+      dirty = true;
+      sfx.lift();
+      scheduleSave();
+      say("stone removed");
+    }
+  });
+
+  canvas.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    if (prefs.sound && !soundOn()) setSound(1);
+    dismissHint();
+    wake();
+    if (!panel.hidden) openPanel(false);
+    const [x, y] = toGame(e);
+    try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
+    dragging = true; last = [x, y]; moved = 0;
+    cursor.on = true; cursor.x = x; cursor.y = y;
+    if (tool === "rake") {
+      pushUndo();
+    } else if (tool === "smooth") {
+      pushUndo();
+      smoothStamp(x, y);
+      dirty = true;
+    } else if (tool === "stone") {
+      const r = rockAt(x, y);
+      if (r) {
+        pushUndo();
+        dragRock = r;
+        dragOff = [r.x - x, r.y - y];
+        sfx.lift();
+      } else if (rocks.length < 40) {
+        pushUndo();
+        const nr = newRock(x, y, ghostSize);
+        rocks.push(nr);
+        rebuildMask();
+        pressUnder(nr);
+        dirty = true;
+        ghostSize = nextGhost();
+        sfx.stone();
+      } else {
+        say("that's plenty of stones");
+      }
+    } else if (tool === "rings") {
+      pushUndo();
+      const r = rockAt(x, y);
+      if (r) ringsAroundRock(r);
+      else rakeRings(x, y, 2, Math.max(3, prefs.tines), 1);
+      sfx.rings();
+    }
+  });
+
+  canvas.addEventListener("pointermove", (e) => {
+    const [x, y] = toGame(e);
+    const now = performance.now();
+    if (cursor.on) {
+      const dx = x - cursor.x, dy = y - cursor.y, d = Math.hypot(dx, dy);
+      if (d > 0.3) {
+        // the rake turns gradually to follow your hand
+        let ux = cursor.dx * 0.6 + (dx / d) * 0.4, uy = cursor.dy * 0.6 + (dy / d) * 0.4;
+        const m = Math.hypot(ux, uy) || 1;
+        cursor.dx = ux / m; cursor.dy = uy / m;
+      }
+    }
+    cursor.on = true; cursor.x = x; cursor.y = y;
+    hoverRock = tool === "stone" || tool === "rings" ? rockAt(x, y) : null;
+    if (!dragging) { if (e.pointerType === "mouse") wake(); return; }
+    const [lx, ly] = last;
+    const seg = Math.hypot(x - lx, y - ly);
+    if (tool === "rake") {
+      if (seg > 0) {
+        const n = Math.max(1, Math.ceil(seg * 2)), nx = -cursor.dy, ny = cursor.dx;
+        for (let i = 1; i <= n; i++) rakeStamp(lx + ((x - lx) * i) / n, ly + ((y - ly) * i) / n, nx, ny);
+        dirty = true;
+        const speed = seg / Math.max(0.008, (now - lastMoveT) / 1000);
+        scrape(clamp(speed / 120, 0.05, 0.45), 2200 + Math.min(1600, speed * 6));
+      }
+    } else if (tool === "smooth") {
+      const n = Math.max(1, Math.ceil(seg));
+      for (let i = 1; i <= n; i++) smoothStamp(lx + ((x - lx) * i) / n, ly + ((y - ly) * i) / n);
+      dirty = true;
+      if (seg > 0) scrape(clamp(seg / 6, 0.03, 0.2), 1100);
+    } else if (tool === "stone" && dragRock) {
+      dragRock.x = clamp(x + dragOff[0], 0, W);
+      dragRock.y = clamp(y + dragOff[1], 0, H);
+      rebuildMask();
+    }
+    moved += seg;
+    last = [x, y];
+    lastMoveT = now;
+  });
+
+  function endDrag() {
+    if (!dragging) return;
+    dragging = false;
+    scrape(0);
+    if (dragRock) {
+      pressUnder(dragRock);
+      rebuildMask();
+      dirty = true;
+      if (moved > 1) sfx.stone();
+      dragRock = null;
+    }
+    // a click with the rake that never moved shouldn't fill the undo list
+    if (tool === "rake" && moved < 0.5 && undoStack.length) { undoStack.pop(); refreshUndo(); }
+    scheduleSave();
+  }
+  canvas.addEventListener("pointerup", endDrag);
+  canvas.addEventListener("pointercancel", endDrag);
+  canvas.addEventListener("pointerleave", () => { if (!dragging) cursor.on = false; });
+
+  canvas.addEventListener("wheel", (e) => {
+    if (tool !== "stone") return;
+    e.preventDefault();
+    const [a, b] = [3.5, 16];
+    ghostSize = clamp(ghostSize * (e.deltaY < 0 ? 1.1 : 0.9), a, b);
+  }, { passive: false });
+
+  window.addEventListener("keydown", (e) => {
+    if (prefs.sound && !soundOn() && e.key !== "m" && e.key !== "M") setSound(1);
+    if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) { e.preventDefault(); undo(); return; }
+    if (e.target instanceof HTMLInputElement) {
+      if (e.key === "Escape") { openPanel(false); settingsBtn.focus(); }
+      return;
+    }
+    const k = e.key.toLowerCase();
+    if (k >= "1" && k <= "4") setTool(["rake", "stone", "smooth", "rings"][+k - 1]);
+    else if (k === "m") { setSound(!prefs.sound); say(prefs.sound ? "sound on" : "sound off"); wake(); }
+    else if (k === "s") openPanel(panel.hidden);
+    else if (e.key === "Escape" && !panel.hidden) { openPanel(false); settingsBtn.focus(); }
+    else if (e.key === "Enter" && e.target === document.body && canFullscreen) toggleFullscreen();
+    else wake();
+  });
+
+  let resizeTimer = 0;
+  window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => layout(false), 150); });
+  window.addEventListener("pagehide", saveNow);
+
+  // ---------------- go ----------------
+  layout(true);
+  applyTheme();
+  refreshControls();
+  refreshUndo();
+  wake();
+  render();
+  let lastT = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.1, (now - lastT) / 1000);
+    lastT = now;
+    update(dt);
+    render();
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
