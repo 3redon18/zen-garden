@@ -213,6 +213,49 @@ input[type="range"] { width: 100%; margin: 0; accent-color: var(--accent); }
 .swatch { height: 22px; border-radius: 3px; margin-bottom: 6px; border: 1px solid rgba(0, 0, 0, 0.25); }
 .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .actions .wide { grid-column: 1 / -1; }
+.mantoggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  font: inherit;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  text-align: left;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.06);
+  border: 2px dashed var(--line);
+  border-radius: 6px;
+  padding: 12px 12px;
+  cursor: pointer;
+}
+.mantoggle svg { width: 14px; height: 20px; flex: none; shape-rendering: crispEdges; opacity: 0.55; }
+.mantoggle .mt-text { flex: 1; }
+.mantoggle .mt-state { font-size: 11px; color: var(--muted); }
+.mantoggle .mt-state::after { content: ""; }
+.mantoggle:hover { border-color: var(--accent); }
+/* pressed in: solid, glowing, with a little live light */
+.mantoggle[aria-pressed="true"] {
+  background: var(--accent);
+  color: #1c1610;
+  border: 2px solid var(--accent);
+  box-shadow: 0 0 0 3px rgba(214, 170, 92, 0.25), inset 0 2px 0 rgba(0, 0, 0, 0.18);
+}
+body.night .mantoggle[aria-pressed="true"] { color: #10141e; box-shadow: 0 0 0 3px rgba(170, 196, 230, 0.25), inset 0 2px 0 rgba(0, 0, 0, 0.18); }
+.mantoggle[aria-pressed="true"] svg { opacity: 1; }
+.mantoggle[aria-pressed="true"] .mt-state { color: inherit; display: flex; align-items: center; gap: 6px; }
+.mantoggle[aria-pressed="true"] .mt-state::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #3f8f3a;
+  box-shadow: 0 0 0 2px rgba(63, 143, 58, 0.3);
+  animation: live 1.6s ease-in-out infinite;
+}
+.mantoggle[aria-pressed="true"] .mt-state::after { content: "active"; }
+@keyframes live { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .mantoggle[aria-pressed="true"] .mt-state::before { animation: none; } }
 .keys { margin: 0; font-size: 11px; line-height: 1.8; letter-spacing: 0.05em; color: var(--muted); }
 @media (prefers-reduced-motion: reduce) {
   .ctl, #tools, #toast, #hint { transition: none; }
@@ -303,8 +346,15 @@ input[type="range"] { width: 100%; margin: 0; accent-color: var(--accent); }
   </header>
 
   <div class="field">
-    <span class="label" id="manLabel">activate the little man</span>
-    <div class="choices two" id="man" role="group" aria-labelledby="manLabel"></div>
+    <button class="mantoggle" id="manToggle" aria-pressed="false">
+      <svg viewBox="0 0 7 10" aria-hidden="true" fill="currentColor">
+        <rect x="2" y="0" width="3" height="3"/><rect x="3" y="3" width="1" height="4"/>
+        <rect x="1" y="4" width="1" height="1"/><rect x="5" y="4" width="1" height="1"/><rect x="2" y="4" width="3" height="1"/>
+        <rect x="2" y="7" width="1" height="2"/><rect x="4" y="7" width="1" height="2"/><rect x="1" y="9" width="1" height="1"/><rect x="5" y="9" width="1" height="1"/>
+      </svg>
+      <span class="mt-text">activate the little man</span>
+      <span class="mt-state" aria-hidden="true"></span>
+    </button>
     <button class="textbtn" id="manReset" hidden>start his world over</button>
   </div>
 
@@ -1980,11 +2030,11 @@ input[type="range"] { width: 100%; margin: 0; accent-color: var(--accent); }
   });
   choiceGroup("size", SIZES, null, (i) => { prefs.size = i; ghostSize = nextGhost(); savePrefsOnly(); });
   choiceGroup("moss", ["off", "on"], null, (i) => { prefs.moss = i; savePrefsOnly(); });
-  choiceGroup("man", ["off", "on"], null, (i) => {
-    const was = prefs.man;
-    prefs.man = i;
-    if (i) { startLife(); if (!was) say("here he comes"); }
-    else { life.on = false; life.held = 0; body.classList.remove("held"); }
+  document.getElementById("manToggle").addEventListener("click", () => {
+    prefs.man = prefs.man ? 0 : 1;
+    if (prefs.man) { startLife(); say("here he comes"); }
+    else { life.on = false; life.held = 0; body.classList.remove("held"); say("the little man is resting"); }
+    refreshControls();
     savePrefsOnly();
   });
   document.getElementById("manReset").addEventListener("click", () => { resetLife(); scheduleSave(); say("a fresh start for him"); });
@@ -2015,7 +2065,7 @@ input[type="range"] { width: 100%; margin: 0; accent-color: var(--accent); }
     mark("time", (i) => TIMES[i] === prefs.time);
     mark("size", (i) => i === prefs.size);
     mark("moss", (i) => i === (prefs.moss ? 1 : 0));
-    mark("man", (i) => i === (prefs.man ? 1 : 0));
+    document.getElementById("manToggle").setAttribute("aria-pressed", String(!!prefs.man));
     document.getElementById("manReset").hidden = !prefs.man;
     tines.value = prefs.tines; tinesOut.textContent = prefs.tines + " tines";
     depth.value = prefs.depth; depthOut.textContent = prefs.depth;
