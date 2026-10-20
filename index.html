@@ -170,6 +170,8 @@ button:focus-visible, input:focus-visible {
   border-radius: 6px;
 }
 #panel[hidden] { display: none; }
+body.held, body.held * { cursor: none !important; }
+body.held #tools, body.held .ctl, body.held #panel { pointer-events: none; }
 #panel header { display: flex; align-items: center; justify-content: space-between; }
 #panel h2 { margin: 0; font-size: 16px; font-weight: 400; letter-spacing: 0.1em; }
 .textbtn {
@@ -301,6 +303,12 @@ input[type="range"] { width: 100%; margin: 0; accent-color: var(--accent); }
   </header>
 
   <div class="field">
+    <span class="label" id="manLabel">activate the little man</span>
+    <div class="choices two" id="man" role="group" aria-labelledby="manLabel"></div>
+    <button class="textbtn" id="manReset" hidden>start his world over</button>
+  </div>
+
+  <div class="field">
     <span class="label" id="sandLabel">sand</span>
     <div class="choices four" id="sand" role="group" aria-labelledby="sandLabel"></div>
   </div>
@@ -341,7 +349,7 @@ input[type="range"] { width: 100%; margin: 0; accent-color: var(--accent); }
     <button class="textbtn wide" id="clearStones">clear all stones</button>
   </div>
 
-  <p class="keys">1 rake &nbsp; 2 stone &nbsp; 3 smooth &nbsp; 4 rings<br>ctrl+z undo &nbsp; m sound &nbsp; s settings<br>enter full screen<br>stone tool: scroll to resize<br>right-click a stone to remove it</p>
+  <p class="keys">the little man tends the garden by himself. poke him too often and see what happens<br><br>1 rake &nbsp; 2 stone &nbsp; 3 smooth &nbsp; 4 rings<br>ctrl+z undo &nbsp; m sound &nbsp; s settings<br>enter full screen<br>stone tool: scroll to resize<br>right-click a stone to remove it</p>
 </section>
 
 <script>
@@ -372,7 +380,7 @@ input[type="range"] { width: 100%; margin: 0; accent-color: var(--accent); }
   }
 
   // ---------------- settings ----------------
-  const DEFAULTS = { sand: "pale", time: "day", tines: 4, depth: 3, size: 3, moss: 1, sound: 0, volume: 6 };
+  const DEFAULTS = { sand: "pale", time: "day", tines: 4, depth: 3, size: 3, moss: 1, sound: 0, volume: 6, man: 0 };
   let prefs = { ...DEFAULTS };
   let saved = null;
   try {
@@ -597,7 +605,7 @@ input[type="range"] { width: 100%; margin: 0; accent-color: var(--accent); }
   let hoverRock = null;
 
   function drawCursor() {
-    if (!cursor.on || !panelClosed()) return;
+    if (!cursor.on || !panelClosed() || life.held) return;
     const dark = prefs.time === "night" ? 0xDDE6F5 : 0x3A2E22;
     const x = cursor.x, y = cursor.y;
     if (tool === "rake") {
@@ -637,6 +645,7 @@ input[type="range"] { width: 100%; margin: 0; accent-color: var(--accent); }
     if (dirty) computeSand();
     px.set(sandRGB);
     drawRocks();
+    drawLife();
     if (prefs.time === "night") {
       for (const f of flies) {
         const glow = 0.5 + 0.5 * Math.sin(t * 1.7 + f[2] * 3);
@@ -662,6 +671,7 @@ input[type="range"] { width: 100%; margin: 0; accent-color: var(--accent); }
         const r = ((c >> 16) & 255) * lightR[i] * k, g = ((c >> 8) & 255) * lightG[i] * k, b = (c & 255) * lightB[i] * k;
         out32[i] = 0xFF000000 | (Math.min(255, b) << 16) | (Math.min(255, g) << 8) | Math.min(255, r);
       }
+    applyGlows();
     ctx.putImageData(img, 0, 0);
   }
 
@@ -681,6 +691,7 @@ input[type="range"] { width: 100%; margin: 0; accent-color: var(--accent); }
       }
     }
     updateSound(dt);
+    updateLife(dt);
   }
 
   // ---------------- garden setup, save & load ----------------
@@ -759,7 +770,7 @@ input[type="range"] { width: 100%; margin: 0; accent-color: var(--accent); }
   }
   function saveNow() {
     try {
-      localStorage.setItem(SAVE_KEY, JSON.stringify({ prefs, w: W, h: H, sand: encodeH(), rocks }));
+      localStorage.setItem(SAVE_KEY, JSON.stringify({ prefs, w: W, h: H, sand: encodeH(), rocks, life: serializeLife() }));
     } catch (e) { /* storage full or blocked: the garden just won't be remembered */ }
   }
   function savePrefsOnly() { scheduleSave(); }
@@ -775,6 +786,7 @@ input[type="range"] { width: 100%; margin: 0; accent-color: var(--accent); }
           h[y * W + x] = oldH[sy * oldW + sx];
         }
       rocks = oldRocks.map((r) => ({ ...r, x: (r.x * W) / oldW, y: (r.y * H) / oldHt }));
+      scaleLife(W / oldW, H / oldHt);
       rebuildMask();
       undoStack.length = 0;
       refreshUndo();
@@ -799,6 +811,7 @@ input[type="range"] { width: 100%; margin: 0; accent-color: var(--accent); }
           decodeH(saved.sand, saved.w, saved.h);
           rocks = (saved.rocks || []).map((r) => ({ ...r, x: (r.x * W) / saved.w, y: (r.y * H) / saved.h }));
           rebuildMask();
+          restoreLife(saved.life, W / saved.w, H / saved.h);
           loaded = true;
         } catch (e) { loaded = false; }
       }
@@ -927,6 +940,21 @@ input[type="range"] { width: 100%; margin: 0; accent-color: var(--accent); }
     },
     bird: () => { const b = rand(2400, 3200); for (let i = 0; i < 3; i++) tone(b, b * 1.35, 0.06, 0.03, "sine", i * 0.11); },
     cricket: () => { for (let i = 0; i < 3; i++) tone(4300, 4200, 0.025, 0.018, "sine", i * 0.045); },
+    // the little man's world
+    chop: () => { tone(180, 90, 0.07, 0.22, "triangle"); noise(1800, 1.5, 0.08, 0.12); },
+    crack: () => { noise(1200, 0.8, 0.5, 0.18); tone(140, 70, 0.4, 0.08, "sawtooth"); },
+    thud: () => { tone(90, 45, 0.15, 0.3); noise(500, 0.8, 0.2, 0.08); },
+    hammer: () => { tone(900, 700, 0.03, 0.12, "square"); tone(300, 200, 0.05, 0.08); },
+    plant: () => { noise(900, 1, 0.15, 0.06); tone(420, 300, 0.06, 0.05); },
+    pour: () => noise(5000, 0.8, 1.8, 0.04),
+    flick: () => { noise(4200, 2, 0.04, 0.08); noise(1500, 0.6, 0.35, 0.04, 0.05); },
+    whoosh: () => noise(1100, 0.7, 0.3, 0.06),
+    door: () => { tone(220, 160, 0.12, 0.08, "triangle"); tone(160, 120, 0.1, 0.06, "triangle", 0.12); },
+    bark: () => { tone(620, 420, 0.06, 0.07, "square"); tone(560, 400, 0.06, 0.06, "square", 0.13); },
+    huh: () => tone(330, 470, 0.09, 0.07, "triangle"),
+    grr: () => tone(140, 110, 0.5, 0.09, "sawtooth"),
+    gotcha: () => { [523, 659, 784].forEach((f, i) => tone(f, f, 0.06, 0.08, "square", i * 0.08)); },
+    fanfare: () => { [523, 659, 784, 1047].forEach((f, i) => tone(f, f, 0.12, 0.07, "triangle", i * 0.12, 0.3)); },
   };
   let chimeTimer = rand(8, 20), birdTimer = rand(6, 16), cricketTimer = 2;
   function updateSound(dt) {
@@ -941,6 +969,931 @@ input[type="range"] { width: 100%; margin: 0; accent-color: var(--accent); }
     if (document.hidden) audio.ctx.suspend().catch(() => {});
     else if (prefs.sound) audio.ctx.resume().catch(() => {});
   });
+
+  // ================= the little man =================
+  // A tiny stick figure who tends the garden on his own: plants seeds, waters them, chops the grown
+  // trees for logs, builds a hut, smokes, sits on stones, re-rakes the sand, and eventually gets a dog.
+  // Poke him too often and he chases your cursor; if he catches it he holds it for a few seconds.
+  const INK = 0x161412;
+  const life = {
+    on: false, man: null, dog: null, trees: [], stumps: [], logs: [], pile: 0, house: null,
+    fire: null, stick: null, parts: [], post: [], glows: [], held: 0, since: 0, dogDue: 300,
+  };
+  const HOUSE_DONE = 7;
+
+  // ---------- small drawing helpers (pre-light, into px) ----------
+  const pp = (x, y, c, a = 255) => blend(Math.floor(x), Math.floor(y), c, a);
+  function ln(x0, y0, x1, y1, c, a = 255) {
+    x0 = Math.round(x0); y0 = Math.round(y0); x1 = Math.round(x1); y1 = Math.round(y1);
+    const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0), 1);
+    for (let i = 0; i <= n; i++) pp(x0 + ((x1 - x0) * i) / n + 0.5, y0 + ((y1 - y0) * i) / n + 0.5, c, a);
+  }
+  function shadow(x, y, rx, ry, a = 70) {
+    for (let yy = Math.floor(y - ry); yy <= y + ry; yy++)
+      for (let xx = Math.floor(x - rx); xx <= x + rx; xx++) {
+        const dx = (xx + 0.5 - x) / rx, dy = (yy + 0.5 - y) / ry;
+        if (dx * dx + dy * dy < 1) blend(xx, yy, 0x1A140E, a);
+      }
+  }
+  // post-light drawing: things that glow or must stay readable at night
+  function post(fn) { life.post.push(fn); }
+  function postPx(x, y, c, a = 255) {
+    x = Math.floor(x); y = Math.floor(y);
+    if (x < 0 || y < 0 || x >= W || y >= H) return;
+    const i = y * W + x, o = out32[i];
+    const cur = ((o & 255) << 16) | (o & 0xFF00) | ((o >> 16) & 255);
+    const m = a >= 255 ? c : mix(cur, c, a | 0);
+    out32[i] = 0xFF000000 | ((m & 255) << 16) | (m & 0xFF00) | ((m >> 16) & 255);
+  }
+  function glow(x, y, r, c, a) { life.glows.push({ x, y, r, c, a }); }
+  function applyGlows() {
+    for (const g of life.glows) {
+      const cr = (g.c >> 16) & 255, cg = (g.c >> 8) & 255, cb = g.c & 255;
+      for (let y = Math.floor(g.y - g.r); y <= g.y + g.r; y++)
+        for (let x = Math.floor(g.x - g.r); x <= g.x + g.r; x++) {
+          if (x < 0 || y < 0 || x >= W || y >= H) continue;
+          const d = Math.hypot(x + 0.5 - g.x, y + 0.5 - g.y) / g.r;
+          if (d >= 1) continue;
+          const k = Math.floor(((1 - d) * (1 - d) * g.a) * 4 + dither(x, y)) / 4;
+          if (k <= 0) continue;
+          const i = y * W + x, o = out32[i];
+          const r = Math.min(255, (o & 255) + cr * k), gg = Math.min(255, ((o >> 8) & 255) + cg * k), b = Math.min(255, ((o >> 16) & 255) + cb * k);
+          out32[i] = 0xFF000000 | (b << 16) | (gg << 8) | r;
+        }
+    }
+    life.glows.length = 0;
+    for (const fn of life.post) fn();
+    life.post.length = 0;
+  }
+
+  // ---------- world helpers ----------
+  const tbHalf = () => 270 / scale, tbH = () => 92 / scale;
+  function nearRock(x, y, clear) {
+    return rocks.some((r) => Math.hypot((x - r.x) / (r.rx + clear), (y - r.y) / (r.ry + clear)) < 1);
+  }
+  function inHouse(x, y, pad = 0) {
+    const hs = life.house;
+    return hs && hs.stage >= 1 && Math.abs(x - hs.x) < 8 + pad && y > hs.y - 4 - pad && y < hs.y + 1 + pad;
+  }
+  function okSpot(x, y, clear = 5) {
+    if (x < 10 || x > W - 10 || y < 18 || y > H - 8) return false;
+    if (y > H - tbH() - 6 && Math.abs(x - W / 2) < tbHalf()) return false;
+    if ((x < 20 || x > W - 20) && (y < 22 || y > H - 22)) return false; // corner buttons
+    if (nearRock(x, y, clear)) return false;
+    if (life.house && Math.abs(x - life.house.x) < 11 + clear && y > life.house.y - 14 - clear && y < life.house.y + 4 + clear) return false;
+    if (life.trees.some((t) => Math.hypot(t.x - x, t.y - y) < clear + 4)) return false;
+    return true;
+  }
+  function findSpot(cx, cy, radius, clear) {
+    for (let i = 0; i < 60; i++) {
+      const x = cx == null ? rand(12, W - 12) : cx + rand(-radius, radius);
+      const y = cy == null ? rand(20, H - 10) : cy + rand(-radius * 0.7, radius * 0.7);
+      if (okSpot(x, y, clear)) return [x, y];
+    }
+    return null;
+  }
+  function blocked(x, y) {
+    const xi = Math.floor(x), yi = Math.floor(y);
+    if (xi >= 0 && yi >= 0 && xi < W && yi < H && mask[yi * W + xi]) return true;
+    return inHouse(x, y);
+  }
+  function dent(x, y, amt) {
+    const xi = Math.floor(x), yi = Math.floor(y);
+    if (xi < 0 || yi < 0 || xi >= W || yi >= H) return;
+    const i = yi * W + xi;
+    if (mask[i]) return;
+    h[i] = Math.max(-1.8, h[i] - amt);
+    dirty = true;
+  }
+  // walk toward a point, sliding around stones; returns true on arrival
+  function move(b, tx, ty, speed, dt, feet = 0.5) {
+    const dx = tx - b.x, dy = ty - b.y, d = Math.hypot(dx, dy);
+    if (d < 0.8) { b.walking = false; return true; }
+    // if he isn't getting any closer, let the task give up
+    const key = Math.round(tx) + "," + Math.round(ty);
+    if (b._tgt !== key) { b._tgt = key; b._best = d; b._noProg = 0; }
+    else if (d < b._best - 0.5) { b._best = d; b._noProg = 0; }
+    else if ((b._noProg += dt) > 5) b.stuckTotal = 99;
+    b.walking = true;
+    b.anim += dt * speed * 0.12;
+    const step = Math.min(d, speed * dt), base = Math.atan2(dy, dx);
+    let moved = false;
+    for (const off of [0, 0.6, -0.6, 1.2, -1.2, 1.9, -1.9, 2.6, -2.6]) {
+      const a = base + off * (b.side || 1);
+      const nx = b.x + Math.cos(a) * step, ny = b.y + Math.sin(a) * step;
+      if (b.ghost || !blocked(nx, ny) || blocked(b.x, b.y)) {
+        b.x = nx; b.y = ny; moved = true;
+        if (Math.abs(Math.cos(a)) > 0.25) b.face = Math.cos(a) > 0 ? 1 : -1;
+        break;
+      }
+    }
+    if (!moved) {
+      b.stuck = (b.stuck || 0) + dt;
+      if (b.stuck > 1) { b.side = -(b.side || 1); b.stuck = 0; }
+      b.stuckTotal = (b.stuckTotal || 0) + dt;
+    } else b.stuckTotal = Math.max(0, (b.stuckTotal || 0) - dt * 0.5);
+    b.x = clamp(b.x, -8, W + 8); b.y = clamp(b.y, 8, H + 2);
+    // footprints in the sand
+    b.stepT = (b.stepT || 0) + dt;
+    if (feet && b.stepT > 0.3 && !b.ghost) {
+      b.stepT = 0;
+      b.foot = -(b.foot || 1);
+      dent(b.x + (dy / (d || 1)) * b.foot * 0.8, b.y - (dx / (d || 1)) * b.foot * 0.8 + 0.5, feet);
+    }
+    return false;
+  }
+
+  // ---------- particles ----------
+  function part(kind, x, y, vx, vy, life_, c) { if (life.parts.length < 160) life.parts.push({ kind, x, y, vx, vy, t: 0, max: life_, c }); }
+  function updateParts(dt) {
+    for (let i = life.parts.length - 1; i >= 0; i--) {
+      const p = life.parts[i];
+      p.t += dt;
+      if (p.t >= p.max) { life.parts.splice(i, 1); continue; }
+      if (p.kind === "chip" || p.kind === "drop" || p.kind === "dirt" || p.kind === "butt") { p.vy += 40 * dt; }
+      if (p.kind === "smoke") { p.vx += Math.sin(t * 2 + p.y) * dt * 2; }
+      p.x += p.vx * dt; p.y += p.vy * dt;
+    }
+  }
+  const Z_GLYPH = [[1, 1, 1], [0, 1, 0], [1, 1, 1]];
+  function drawParts() {
+    for (const p of life.parts) {
+      const f = 1 - p.t / p.max;
+      if (p.kind === "smoke") pp(p.x, p.y, 0xD8D4CC, 150 * f);
+      else if (p.kind === "spark" || p.kind === "ember") post(() => postPx(p.x, p.y, p.c, 255 * f));
+      else if (p.kind === "heart") post(() => { for (const [a, b] of [[0, 0], [2, 0], [0, 1], [1, 1], [2, 1], [1, 2]]) postPx(p.x + a - 1, p.y + b, 0xE8607A, 255 * Math.min(1, f * 2)); });
+      else if (p.kind === "z") post(() => Z_GLYPH.forEach((row, r) => row.forEach((v, q) => v && postPx(p.x + q, p.y + r, 0xE8EEF8, 230 * Math.min(1, f * 2)))));
+      else pp(p.x, p.y, p.c, 255 * Math.min(1, f * 3));
+    }
+  }
+
+  // ---------- trees, logs, house, fire ----------
+  function newTree(x, y) { return { x, y, stage: 0, g: 0, water: 1, ph: rand(0, 6.28), fall: 0, side: 1 }; }
+  const logsNeeded = () => {
+    const hs = life.house;
+    if (!hs || hs.stage >= HOUSE_DONE) return 0;
+    return HOUSE_DONE - hs.stage - life.logs.length - (life.man && life.man.carry ? 1 : 0);
+  };
+  function updateTrees(dt) {
+    for (let i = life.trees.length - 1; i >= 0; i--) {
+      const tr = life.trees[i];
+      if (tr.fall > 0) {
+        tr.fall += dt * (0.6 + tr.fall * 1.8);
+        if (tr.fall >= 1) {
+          life.trees.splice(i, 1);
+          life.stumps.push({ x: tr.x, y: tr.y, t: 0 });
+          life.logs.push({ x: tr.x + tr.side * 6, y: tr.y + 1 }, { x: tr.x + tr.side * 11, y: tr.y - 1 });
+          for (let k = 0; k < 8; k++) part("dirt", tr.x + tr.side * rand(4, 12), tr.y, rand(-8, 8), rand(-14, -4), 0.6, 0xB8A888);
+          for (let k = 0; k < 6; k++) part("chip", tr.x + tr.side * rand(5, 12), tr.y - rand(2, 5), rand(-10, 10), rand(-16, -6), 0.8, 0x4E7A34);
+          sfx.thud();
+        }
+        continue;
+      }
+      if (tr.stage >= 3) continue;
+      tr.water = Math.max(0, tr.water - dt / 70);
+      tr.g += dt * (tr.water > 0 ? 1 : 0.25);
+      const need = [9, 22, 40][tr.stage];
+      if (tr.g >= need) { tr.g = 0; tr.stage++; if (tr.stage === 3) for (let k = 0; k < 4; k++) part("chip", tr.x + rand(-3, 3), tr.y - rand(6, 11), rand(-4, 4), rand(-6, 0), 0.7, 0x6E9A44); }
+    }
+    for (let i = life.stumps.length - 1; i >= 0; i--) if ((life.stumps[i].t += dt) > 150) life.stumps.splice(i, 1);
+    if (life.fire && (life.fire.t -= dt) <= 0) life.fire = null;
+  }
+  function drawTree(tr) {
+    const x = Math.floor(tr.x), y = Math.floor(tr.y);
+    const night = prefs.time === "night";
+    const T0 = 0x5C3A22, T1 = 0x7A5232, L0 = night ? 0x22401E : 0x2F5A2A, L1 = night ? 0x335A2A : 0x4E7A34, L2 = night ? 0x46703A : 0x6E9A44;
+    if (tr.stage === 0) { pp(x - 1, y, 0xF0E4C8, 200); pp(x, y, 0xF0E4C8, 200); pp(x + 1, y, 0xF0E4C8, 200); pp(x, y - 1, 0x6B4A2A); return; }
+    if (tr.stage === 1) { pp(x, y, L1); pp(x, y - 1, L1); pp(x - 1, y - 2, L2); pp(x + 1, y - 2, L2); return; }
+    const sway = Math.sin(t * 0.8 + tr.ph) * 0.5;
+    if (tr.stage === 2) {
+      ln(x, y, x, y - 4, T0);
+      for (let yy = -2; yy <= 2; yy++) for (let xx = -2; xx <= 2; xx++)
+        if (xx * xx + yy * yy <= 5) pp(x + xx + sway, y - 6 + yy, (xx + yy < 0) ? L2 : (xx + yy > 1 ? L0 : L1));
+      return;
+    }
+    // grown tree, or one falling over
+    const ang = tr.fall > 0 ? tr.fall * tr.fall * (Math.PI / 2) * tr.side : 0;
+    const sx = Math.sin(ang), cy = Math.cos(ang);
+    for (let k = 0; k <= 6; k++) { pp(x + sx * k, y - cy * k, T0); pp(x + 1 + sx * k, y - cy * k, T1); }
+    const cxp = x + 0.5 + sx * 9 + (tr.fall ? 0 : sway), cyp = y - cy * 9;
+    for (let yy = -5; yy <= 5; yy++) for (let xx = -5; xx <= 5; xx++) {
+      const d = xx * xx + yy * yy;
+      if (d > 22 + Math.sin(xx * 2.1 + yy * 1.3 + tr.ph) * 4) continue;
+      const lit = -(xx + yy) * 0.25 + dither(xx & 3, yy & 3);
+      pp(cxp + xx, cyp + yy, lit > 1.2 ? L2 : lit > 0.2 ? L1 : L0);
+    }
+  }
+  function drawLog(x, y) {
+    x = Math.floor(x); y = Math.floor(y);
+    for (let k = -2; k <= 1; k++) { pp(x + k, y - 1, 0x7A5232); pp(x + k, y, 0x5C3A22); }
+    pp(x + 2, y - 1, 0xC9A06A); pp(x + 2, y, 0xA87E4E);
+  }
+  function drawHouse(hs) {
+    const x = Math.floor(hs.x), y = Math.floor(hs.y), s = hs.stage;
+    const night = prefs.time === "night";
+    if (s === 0) { for (const [a, b] of [[-7, -3], [7, -3], [-7, 0], [7, 0]]) { pp(x + a, y + b, 0x6B4426); pp(x + a, y + b - 1, 0x8E6038); } return; }
+    // floor
+    for (let r = -3; r <= 0; r++) for (let c = -7; c <= 7; c++) pp(x + c, y + r, (r & 1) ? 0x8E6038 : 0xA2744A);
+    const wallH = [0, 0, 2, 4, 6, 6, 6, 6][s];
+    for (let r = 1; r <= wallH; r++) for (let c = -7; c <= 7; c++) pp(x + c, y - r, r % 2 ? 0x6B4426 : 0x8A5A32);
+    if (wallH) { for (let r = 1; r <= wallH; r++) { pp(x - 7, y - r, 0x4A2E1A); pp(x + 7, y - r, 0x4A2E1A); } }
+    if (s >= 5) {
+      const rows = s >= 6 ? 6 : 3;
+      for (let r = 0; r < rows; r++) {
+        const half = 9 - r * 1.5;
+        for (let c = Math.ceil(-half); c <= Math.floor(half); c++) pp(x + c, y - 7 - r, r % 2 ? 0x7A3B28 : 0x924A30);
+      }
+      if (s >= 6) { pp(x, y - 13, 0x5E2A1C); }
+    }
+    if (s >= 7) {
+      for (let r = 1; r <= 4; r++) for (let c = -1; c <= 1; c++) pp(x + c - 3, y - r, 0x2A1A10);
+      pp(x - 2, y - 2, 0xC9A06A);
+      const lit = life.man && life.man.hidden;
+      for (let r = 3; r <= 4; r++) for (let c = 2; c <= 4; c++) pp(x + c, y - r, 0x2A2A30);
+      if (lit) {
+        post(() => { for (let r = 3; r <= 4; r++) for (let c = 2; c <= 4; c++) postPx(x + c, y - r, 0xFFD27A); });
+        glow(x + 3.5, y - 3, 9, 0xFFC060, night ? 0.35 : 0.12);
+      }
+      for (let r = 10; r <= 12; r++) { pp(x + 4, y - r, 0x6B6B6B); pp(x + 5, y - r, 0x575757); }
+      if ((lit || life.fire) && Math.random() < 0.06) part("smoke", x + 4.5, y - 13, rand(-1, 1), rand(-5, -3), 3, 0);
+    }
+    // woodpile against the right wall
+    for (let k = 0; k < life.pile; k++) drawLog(x + 10 + (k % 2), y - Math.floor(k / 2) * 2 - (k % 2 ? 1 : 0));
+  }
+  function drawFire(f) {
+    const x = Math.floor(f.x), y = Math.floor(f.y);
+    pp(x - 2, y, 0x5C3A22); pp(x - 1, y, 0x7A5232); pp(x + 1, y, 0x7A5232); pp(x + 2, y, 0x5C3A22); pp(x, y + 1, 0x5C3A22);
+    const fl = Math.sin(t * 17) + Math.sin(t * 23);
+    post(() => {
+      postPx(x, y - 1, 0xFF8A2A); postPx(x - 1, y - 1, 0xFF6A2A); postPx(x + 1, y - 1, 0xFFB347);
+      postPx(x, y - 2, 0xFFD27A); if (fl > 0) postPx(x + (fl > 1 ? 1 : 0), y - 3, 0xFFE8A8);
+    });
+    glow(x + 0.5, y - 1, 14, 0xFFA040, prefs.time === "night" ? 0.45 : 0.18);
+    if (Math.random() < 0.2) part("ember", x + rand(-1, 1), y - 2, rand(-2, 2), rand(-12, -6), 0.9, 0xFFB347);
+  }
+
+  // ---------- the man ----------
+  function newMan(x, y) {
+    return { x, y, face: 1, task: null, anim: 0, walking: false, pose: "stand", tool: null, carry: false,
+      bubble: null, bubbleT: 0, pokes: [], calmUntil: 0, hidden: false, jump: 0, ghost: false, swing: 0, hand: 0 };
+  }
+  function bubble(b, kind, dur = 1.6) { b.bubble = kind; b.bubbleT = dur; }
+  function siteHouse() {
+    let best = null;
+    for (let i = 0; i < 80 && !best; i++) {
+      const x = rand(W * 0.15, W * 0.85), y = rand(H * 0.3, H * 0.75);
+      if (okSpot(x, y, 12)) best = [x, y];
+    }
+    if (!best) best = findSpot(null, null, 0, 6) || [W * 0.5, H * 0.45];
+    life.house = { x: best[0], y: best[1], stage: 0 };
+  }
+
+  const TASKS = {
+    arrive(m, k, dt) {
+      if (!k.to) k.to = life.house ? [life.house.x - 12, life.house.y + 3] : (findSpot(W / 2, H / 2, W * 0.3, 4) || [W / 2, H / 2]);
+      return move(m, k.to[0], k.to[1], 10, dt) || m.stuckTotal > 4;
+    },
+    wander(m, k, dt) {
+      if (!k.to) k.to = findSpot(m.x, m.y, 45, 3) || [m.x, m.y];
+      return move(m, k.to[0], k.to[1], 8, dt) || m.stuckTotal > 3;
+    },
+    idle(m, k, dt) {
+      if (!k.v) { k.v = ["look", "stretch", "scratch", "hop", "yawn"][(Math.random() * 5) | 0]; k.t = k.v === "hop" ? 1.2 : 2.2; }
+      k.t -= dt;
+      m.pose = k.v === "stretch" || k.v === "yawn" ? "armsup" : k.v === "scratch" ? "scratch" : "stand";
+      if (k.v === "look" && Math.random() < dt * 1.8) m.face = -m.face;
+      if (k.v === "hop" && m.jump <= 0 && k.t > 0.3) m.jump = 0.4;
+      return k.t <= 0;
+    },
+    plant(m, k, dt) {
+      if (!k.to) {
+        const hs = life.house;
+        k.to = (hs && findSpot(hs.x, hs.y + 4, 40, 4)) || findSpot(null, null, 0, 4);
+        if (!k.to) return true;
+      }
+      if (!k.ap) k.ap = [k.to[0] + (m.x < k.to[0] ? -3 : 3), k.to[1]];
+      if (!k.phase) { if (!move(m, k.ap[0], k.ap[1], 9, dt)) return m.stuckTotal > 4; k.phase = 1; k.t = 1.8; m.face = k.to[0] > m.x ? 1 : -1; }
+      m.pose = "kneel"; m.tool = "seed";
+      k.t -= dt;
+      if (Math.random() < dt * 6) part("dirt", k.to[0] + rand(-1, 1), k.to[1], rand(-6, 6), rand(-10, -4), 0.4, 0xB8A888);
+      if (k.t <= 0) { life.trees.push(newTree(k.to[0], k.to[1])); dent(k.to[0], k.to[1], 0.4); sfx.plant(); return true; }
+      return false;
+    },
+    water(m, k, dt) {
+      const tr = k.tree;
+      if (!life.trees.includes(tr)) return true;
+      if (!k.phase) { m.tool = "can"; if (!move(m, tr.x - 5 * (k.side || (k.side = m.x < tr.x ? 1 : -1)), tr.y + 1, 9, dt)) { if (m.stuckTotal > 4) { tr.skip = life.since + 25; return true; } return false; } k.phase = 1; k.t = 2.4; m.face = tr.x > m.x ? 1 : -1; sfx.pour(); }
+      m.pose = "pour"; m.tool = "can";
+      k.t -= dt;
+      if (Math.random() < dt * 14) part("drop", m.x + m.face * 4, m.y - 3, m.face * rand(4, 9), rand(-2, 2), 0.35, 0x8EC5E8);
+      if (k.t <= 0) { tr.water = 1; return true; }
+      return false;
+    },
+    chop(m, k, dt) {
+      const tr = k.tree;
+      if (!life.trees.includes(tr)) return true;
+      if (!k.phase) {
+        k.side = k.side || (m.x < tr.x ? -1 : 1);
+        m.tool = "axe";
+        if (!move(m, tr.x + k.side * 4, tr.y + 0.5, 9, dt)) { if (m.stuckTotal > 4) { tr.skip = life.since + 25; return true; } return false; }
+        k.phase = 1; k.n = 0; m.swing = 0;
+      }
+      m.face = tr.x > m.x ? 1 : -1;
+      if (k.phase === 1) {
+        m.pose = "swing"; m.tool = "axe";
+        const before = m.swing;
+        m.swing = (m.swing + dt / 0.6) % 1;
+        if (before < 0.7 && m.swing >= 0.7) {
+          k.n++;
+          sfx.chop();
+          for (let q = 0; q < 3; q++) part("chip", tr.x, tr.y - 2, -m.face * rand(4, 12), rand(-14, -6), 0.5, 0xC9A06A);
+          if (k.n >= 6) { tr.fall = 0.01; tr.side = m.face; sfx.crack(); k.phase = 2; k.t = 1.4; }
+        }
+        return false;
+      }
+      m.pose = "stand"; m.tool = "axe";
+      return (k.t -= dt) <= 0;
+    },
+    fetchlog(m, k, dt) {
+      const lg = k.log;
+      if (!life.logs.includes(lg)) return true;
+      if (!k.phase) { m.tool = null; if (!move(m, lg.x - 2, lg.y + 1, 9, dt)) return m.stuckTotal > 4; k.phase = 1; k.t = 0.6; }
+      m.pose = "kneel";
+      if ((k.t -= dt) <= 0) { life.logs.splice(life.logs.indexOf(lg), 1); m.carry = true; m.pose = "stand"; return true; }
+      return false;
+    },
+    build(m, k, dt) {
+      const hs = life.house;
+      if (!hs) { m.carry = false; return true; }
+      if (!k.phase) { if (!move(m, hs.x + 10, hs.y + 1.5, 8, dt)) return m.stuckTotal > 5; k.phase = 1; k.n = 0; m.carry = false; m.swing = 0; sfx.thud(); }
+      m.face = -1; m.pose = "swing"; m.tool = "hammer";
+      const before = m.swing;
+      m.swing = (m.swing + dt / 0.42) % 1;
+      if (before < 0.7 && m.swing >= 0.7) {
+        k.n++;
+        sfx.hammer();
+        part("chip", hs.x + 6, hs.y - rand(1, 5), rand(-6, 2), rand(-10, -4), 0.4, 0xE0C9A0);
+        if (k.n >= 4) {
+          hs.stage++;
+          if (hs.stage >= HOUSE_DONE) {
+            sfx.fanfare(); bubble(m, "heart", 2.5); m.jump = 0.45;
+            for (let q = 0; q < 4; q++) part("heart", hs.x + rand(-6, 6), hs.y - 14, rand(-2, 2), rand(-8, -4), 1.6, 0);
+            life.dogDue = Math.min(life.dogDue, life.since + 25);
+          }
+          scheduleSave();
+          return true;
+        }
+      }
+      return false;
+    },
+    stack(m, k, dt) {
+      const hs = life.house;
+      if (!move(m, hs.x + 12, hs.y + 1.5, 8, dt) && m.stuckTotal < 5) return false;
+      m.carry = false; life.pile = Math.min(4, life.pile + 1); sfx.thud();
+      return true;
+    },
+    smoke(m, k, dt) {
+      if (!k.phase) {
+        // half the time he climbs onto a big stone to smoke
+        if (k.rock === undefined) {
+          const big = rocks.filter((r) => r.rx >= 7);
+          k.rock = big.length && Math.random() < 0.55 ? big[(Math.random() * big.length) | 0] : null;
+          k.to = k.rock ? [k.rock.x + (k.rock.rx + 2) * (m.x < k.rock.x ? -1 : 1), k.rock.y + 1] : (findSpot(m.x, m.y, 30, 3) || [m.x, m.y]);
+        }
+        if (!move(m, k.to[0], k.to[1], 8, dt) && m.stuckTotal < 4) return false;
+        if (k.rock && rocks.includes(k.rock)) { m.ghost = true; k.seat = [k.rock.x, k.rock.y - k.rock.ry * 0.35]; m.jump = 0.4; }
+        k.phase = 1; k.t = rand(14, 22); k.puff = 2; m.tool = "cig"; sfx.flick();
+        for (let q = 0; q < 4; q++) part("spark", m.x + m.face * 2, m.y - 5, rand(-6, 6), rand(-8, -2), 0.3, 0xFFD27A);
+      }
+      if (k.seat && m.jump > 0) { m.x += (k.seat[0] - m.x) * Math.min(1, dt * 8); m.y += (k.seat[1] - m.y) * Math.min(1, dt * 8); }
+      m.pose = "sit"; m.tool = "cig";
+      k.t -= dt; k.puff -= dt;
+      m.hand = k.puff < 0.8 && k.puff > 0 ? 1 : 0; // hand to mouth
+      if (k.puff <= 0) {
+        k.puff = rand(3, 5);
+        for (let q = 0; q < 5; q++) part("smoke", m.x + m.face * 2, m.y - 7, m.face * rand(1, 4), rand(-5, -2), rand(2, 3.5), 0);
+      }
+      if (Math.random() < dt * 0.4) m.face = -m.face;
+      if (k.t <= 0) {
+        part("butt", m.x + m.face * 2, m.y - 4, m.face * 14, -12, 0.6, 0xE8E0D0);
+        if (k.seat) { m.x = k.to[0]; m.y = k.to[1]; m.jump = 0.35; }
+        m.ghost = false;
+        return true;
+      }
+      return false;
+    },
+    sit(m, k, dt) {
+      if (!k.phase) {
+        if (!k.to) k.to = findSpot(m.x, m.y, 35, 3) || [m.x, m.y];
+        if (!move(m, k.to[0], k.to[1], 8, dt) && m.stuckTotal < 4) return false;
+        k.phase = 1; k.t = rand(9, 16); k.lie = Math.random() < 0.4;
+      }
+      m.pose = k.lie ? "lie" : "sit"; m.tool = null;
+      k.t -= dt;
+      if (Math.random() < dt * 0.25) bubble(m, "note", 1.2);
+      if (life.dog && Math.random() < dt * 0.3 && Math.hypot(life.dog.x - m.x, life.dog.y - m.y) < 8) part("heart", m.x, m.y - 9, 0, -5, 1, 0);
+      return k.t <= 0;
+    },
+    rake(m, k, dt) {
+      // tidies a strip of sand back into straight lines, pulling a little rake behind him
+      if (!k.phase) {
+        if (!k.from) {
+          for (let i = 0; i < 30 && !k.from; i++) {
+            const y0 = Math.floor(rand(22, H - 16) / S) * S + S * 1.5 - 0.5;
+            const x0 = rand(15, W - 60), dir = Math.random() < 0.5 ? 1 : -1, len = rand(28, 50);
+            const xs = dir > 0 ? x0 : x0 + len, xe = dir > 0 ? x0 + len : x0;
+            let ok = true;
+            for (let x = Math.min(xs, xe); x <= Math.max(xs, xe); x += 2) if (!okSpot(x, y0, 3)) { ok = false; break; }
+            if (ok) { k.from = [xs, y0]; k.to = [xe, y0]; k.dir = dir; }
+          }
+          if (!k.from) return true;
+        }
+        if (!move(m, k.from[0], k.from[1], 9, dt) && m.stuckTotal < 4) return false;
+        k.phase = 1;
+      }
+      m.tool = "rake"; m.pose = "rake";
+      const half = S * 1.5;
+      const done = move(m, k.to[0], k.to[1], 5, dt, 0);
+      m.face = k.dir;
+      const rx = Math.floor(m.x - k.dir * 5), a = amp();
+      for (let dx = -1; dx <= 1; dx++)
+        for (let y = Math.floor(m.y - half); y <= m.y + half; y++) {
+          const xx = rx + dx;
+          if (xx < 0 || y < 0 || xx >= W || y >= H || mask[y * W + xx]) continue;
+          h[y * W + xx] = -Math.cos((2 * Math.PI * (y + 0.5)) / S) * a;
+        }
+      dirty = true;
+      if (Math.random() < dt * 0.4) bubble(m, "note", 1);
+      return done || m.stuckTotal > 3;
+    },
+    fetch(m, k, dt) {
+      const dog = life.dog;
+      if (!dog) return true;
+      if (k.n === undefined) { k.n = 0; k.t = 0.6; }
+      m.pose = "stand"; m.tool = null;
+      if (!life.stick && dog.state !== "fetch") {
+        if ((k.t -= dt) > 0) { m.pose = "throw"; return false; }
+        if (k.n >= 3) { bubble(m, "heart", 1.5); return true; }
+        const tgt = findSpot(m.x + m.face * 25, m.y, 18, 2) || findSpot(m.x, m.y, 30, 2);
+        if (!tgt) return true;
+        life.stick = { x: m.x + m.face * 2, y: m.y - 5, z: 5, tx: tgt[0], ty: tgt[1], f: 0, sx: m.x, sy: m.y, land: false };
+        dog.state = "fetch"; k.n++; k.t = 0.8;
+        sfx.whoosh();
+      }
+      if (dog.state === "fetch" && Math.random() < dt * 0.3) bubble(m, "note", 0.8);
+      return false;
+    },
+    campfire(m, k, dt) {
+      const hs = life.house;
+      if (!k.to) k.to = findSpot(hs.x - 14, hs.y + 6, 10, 3) || [hs.x - 14, hs.y + 6];
+      if (!k.phase) { if (!move(m, k.to[0] - 4, k.to[1], 8, dt) && m.stuckTotal < 4) return false; k.phase = 1; k.t = 2; }
+      if (k.phase === 1) {
+        m.pose = "kneel"; m.face = 1;
+        if ((k.t -= dt) <= 0) { life.pile = Math.max(0, life.pile - 1); life.fire = { x: k.to[0], y: k.to[1], t: 70 }; sfx.flick(); k.phase = 2; k.t = rand(20, 30); }
+        return false;
+      }
+      m.pose = "sit"; m.face = 1; m.tool = Math.random() < 0.002 ? null : m.tool;
+      if (Math.random() < dt * 0.15) bubble(m, "note", 1.2);
+      return (k.t -= dt) <= 0;
+    },
+    sleep(m, k, dt) {
+      const hs = life.house;
+      if (!k.phase) { if (!move(m, hs.x - 3, hs.y + 1.5, 8, dt) && m.stuckTotal < 5) return false; k.phase = 1; m.hidden = true; sfx.door(); }
+      if (Math.random() < dt * 0.7) part("z", hs.x + 4, hs.y - 6, rand(1, 3), rand(-5, -3), 2.2, 0);
+      if (prefs.time !== "night") { m.hidden = false; m.x = hs.x - 3; m.y = hs.y + 2.5; sfx.door(); bubble(m, "note", 1.5); return true; }
+      return false;
+    },
+    nap(m, k, dt) {
+      if (!k.phase) { k.to = k.to || findSpot(m.x, m.y, 20, 3) || [m.x, m.y]; if (!move(m, k.to[0], k.to[1], 8, dt) && m.stuckTotal < 4) return false; k.phase = 1; }
+      m.pose = "lie"; m.tool = null;
+      if (Math.random() < dt * 0.7) part("z", m.x + 1, m.y - 4, rand(1, 3), rand(-5, -3), 2.2, 0);
+      return prefs.time !== "night";
+    },
+    chase(m, k, dt) {
+      m.ghost = true; m.tool = null; m.pose = "angry";
+      // a moment of stomping and fuming first, so you have a head start
+      if (k.wind === undefined) k.wind = 1.1;
+      if (k.wind > 0) {
+        k.wind -= dt;
+        if (m.jump <= 0) m.jump = 0.25;
+        if (Math.random() < dt * 14) part("smoke", m.x + rand(-2, 2), m.y - 9, rand(-4, 4), rand(-7, -3), 0.5, 0);
+        if (cursor.on) m.face = cursor.x > m.x ? 1 : -1;
+        return false;
+      }
+      k.t -= dt;
+      if (Math.random() < dt * 8) part("smoke", m.x + rand(-1, 1), m.y - 9, rand(-3, 3), rand(-6, -3), 0.6, 0);
+      if (!cursor.on) { k.lost = (k.lost || 0) + dt; if (k.lost > 2) { bubble(m, "question", 1.5); m.ghost = false; m.task = { kind: "grumble" }; } return false; }
+      k.lost = 0;
+      const sp = Math.min(30, 18 + (8 - k.t) * 2);
+      move(m, cursor.x, cursor.y + 5, sp, dt, 0.3);
+      if (Math.hypot(cursor.x - m.x, cursor.y - (m.y - 5)) < 3.2) {
+        life.held = 4;
+        endDrag();
+        if (!panel.hidden) openPanel(false);
+        document.body.classList.add("held");
+        say("he caught your cursor!");
+        sfx.gotcha();
+        m.task = { kind: "hold" };
+        return false;
+      }
+      if (k.t <= 0) { bubble(m, "question", 1.5); m.ghost = false; m.task = { kind: "grumble" }; }
+      return false;
+    },
+    hold(m, k, dt) {
+      m.pose = "hold"; m.tool = null; m.ghost = false;
+      life.held -= dt;
+      if (Math.random() < dt * 2) bubble(m, "note", 0.6);
+      if (life.held <= 0) {
+        life.held = 0;
+        document.body.classList.remove("held");
+        say("he let go");
+        m.calmUntil = life.since + 12;
+        m.pokes = [];
+        m.task = { kind: "grumble" };
+      }
+      return false;
+    },
+    grumble(m, k, dt) {
+      if (k.t === undefined) { k.t = 2.5; bubble(m, "cloud", 2.5); }
+      m.pose = "arms"; m.tool = null; m.ghost = false;
+      return (k.t -= dt) <= 0;
+    },
+  };
+
+  function chooseTask(m) {
+    const hs = life.house;
+    if (prefs.time === "night") return hs && hs.stage >= HOUSE_DONE ? { kind: "sleep" } : { kind: "nap" };
+    if (!hs) siteHouse();
+    const house = life.house, done = house.stage >= HOUSE_DONE;
+    if (m.carry) return done ? { kind: "stack" } : { kind: "build" };
+    if (!done && life.logs.length) return { kind: "fetchlog", log: life.logs[0] };
+    const grown = life.trees.filter((tr) => tr.stage >= 3 && !tr.fall && !((tr.skip || 0) > life.since));
+    if (!done && grown.length && logsNeeded() > 0) return { kind: "chop", tree: grown[(Math.random() * grown.length) | 0] };
+    const thirsty = life.trees.find((tr) => tr.stage < 3 && tr.water < 0.35 && !((tr.skip || 0) > life.since));
+    if (thirsty) return { kind: "water", tree: thirsty };
+    const growing = life.trees.filter((tr) => tr.stage < 3).length;
+    if (!done && (growing + grown.length) * 2 < logsNeeded() && Math.random() < 0.85) return { kind: "plant" };
+    if (prefs.time === "dusk" && done && !life.fire && life.pile > 0 && Math.random() < 0.5) return { kind: "campfire" };
+    if (done && life.logs.length) return { kind: "fetchlog", log: life.logs[0] };
+    const options = [["smoke", 3], ["sit", 3], ["rake", 3], ["wander", 2], ["idle", 2]];
+    if (life.trees.length < 7) options.push(["plant", done ? 2 : 1]);
+    if (life.dog) options.push(["fetch", 3]);
+    if (done && life.pile < 4 && grown.length > 2) options.push(["chopwood", 1]);
+    let sum = options.reduce((s, o) => s + o[1], 0), r = Math.random() * sum;
+    for (const [kind, w] of options) {
+      if ((r -= w) <= 0) {
+        if (kind === "chopwood") return { kind: "chop", tree: grown[0] };
+        return { kind };
+      }
+    }
+    return { kind: "idle" };
+  }
+
+  function updateMan(m, dt) {
+    if (m.bubbleT > 0 && (m.bubbleT -= dt) <= 0) m.bubble = null;
+    if (m.jump > 0) m.jump -= dt;
+    if (!m.task) { m.task = chooseTask(m); m.stuckTotal = 0; }
+    // night falls: whatever he's doing (unless he's angry), he heads for bed
+    if (prefs.time === "night" && !["sleep", "nap", "chase", "hold", "grumble"].includes(m.task.kind) && !m.carry) { m.task = chooseTask(m); m.ghost = false; }
+    const k = m.task;
+    // nothing takes forever: give up on a task he can't finish
+    k.age = (k.age || 0) + dt;
+    if (k.age > 70 && !['sleep', 'nap', 'hold', 'chase'].includes(k.kind)) { m.task = null; m.ghost = false; m.pose = 'stand'; return; }
+    m.walking = false;
+    if (k.kind !== "smoke") m.hand = 0;
+    if (TASKS[k.kind](m, k, dt)) {
+      if (m.task === k) m.task = null;
+      if (!["chop", "water"].includes(k.kind)) m.tool = null;
+      m.pose = "stand";
+    }
+    if (m.walking && m.pose !== "angry" && m.pose !== "rake") m.pose = m.carry ? "carry" : "walk";
+  }
+
+  function poke(m) {
+    if (m.hidden) return;
+    const kind = m.task && m.task.kind;
+    if (kind === "chase" || kind === "hold") return;
+    const now = life.since;
+    m.pokes = m.pokes.filter((p) => now - p < 6);
+    m.pokes.push(now);
+    m.jump = 0.35;
+    sfx.huh();
+    if (m.pokes.length >= 4 && now > m.calmUntil) {
+      if (m.carry) { life.logs.push({ x: m.x + 3, y: m.y }); m.carry = false; }
+      bubble(m, "angry", 8);
+      sfx.grr();
+      m.task = { kind: "chase", t: 8 };
+      m.pokes = [];
+      return;
+    }
+    bubble(m, m.pokes.length >= 3 ? "angry" : "bang", 1.2);
+  }
+
+  // stick figure, drawn from a few joints so every pose can be animated
+  function drawMan(m) {
+    if (m.hidden) return;
+    const x = Math.floor(m.x), y0 = Math.floor(m.y);
+    const lift = m.jump > 0 ? Math.round(Math.sin((m.jump / 0.4) * Math.PI) * 3) : 0;
+    const y = y0 - lift, f = m.face, c = INK;
+    const step = Math.floor(m.anim * 2) % 2;
+    let head = [x, y - 7], neck = [x, y - 5], hip = [x, y - 3], feet, hands;
+    switch (m.pose) {
+      case "walk": case "carry": case "angry": case "rake":
+        feet = step ? [[x - 1, y], [x + 1, y]] : [[x, y], [x, y - 1]];
+        hands = m.pose === "carry" ? [[x - 1, y - 7], [x + 1, y - 7]]
+          : m.pose === "angry" ? [[x - 2, y - 7 - step], [x + 2, y - 6 - (1 - step)]]
+          : m.pose === "rake" ? [[x - f, y - 3], [x - f * 2, y - 3]]
+          : [[x - 1 - step, y - 2], [x + 1 + (1 - step), y - 2]];
+        break;
+      case "kneel":
+        head = [x, y - 5]; neck = [x, y - 3]; hip = [x, y - 2];
+        feet = [[x - f, y], [x + f * 2, y]]; hands = [[x + f * 2, y - 1], [x + f, y - 1]];
+        break;
+      case "sit":
+        head = [x, y - 5]; neck = [x, y - 3]; hip = [x, y - 1];
+        feet = [[x + f * 3, y], [x + f * 2, y]];
+        hands = m.hand ? [[x - f, y - 2], [x + f, y - 5]] : [[x - f, y - 1], [x + f * 2, y - 2]];
+        break;
+      case "lie":
+        head = [x - f * 3, y - 1]; neck = [x - f * 2, y - 1]; hip = [x + f, y - 1];
+        feet = [[x + f * 3, y - 1], [x + f * 3, y - 2]]; hands = [[x - f * 4, y - 2], [x - f * 3, y - 3]];
+        break;
+      case "swing": {
+        feet = [[x - 1, y], [x + 1, y]];
+        const s = m.swing < 0.6 ? m.swing / 0.6 : 1 - (m.swing - 0.6) / 0.4 * 0.0;
+        const ang = m.swing < 0.6 ? -2.2 + s * 0.6 : -1.6 + ((m.swing - 0.6) / 0.4) * 2.3; // raise slowly, strike fast
+        const hx = x + Math.cos(ang) * 3 * f, hy = y - 4 + Math.sin(ang) * 3;
+        hands = [[hx, hy], [hx, hy]];
+        break;
+      }
+      case "pour": feet = [[x - 1, y], [x + 1, y]]; hands = [[x + f * 3, y - 4], [x + f * 2, y - 3]]; break;
+      case "armsup": feet = [[x - 1, y], [x + 1, y]]; hands = [[x - 2, y - 8], [x + 2, y - 8]]; break;
+      case "scratch": feet = [[x - 1, y], [x + 1, y]]; hands = [[x - f, y - 2], [x + f, y - 8]]; break;
+      case "arms": feet = [[x - 1, y], [x + 1, y]]; hands = [[x + 1, y - 4], [x - 1, y - 4]]; break;
+      case "throw": feet = [[x - 1, y], [x + 1, y]]; hands = [[x - f, y - 2], [x + f * 2, y - 8]]; break;
+      case "hold": {
+        const sh = Math.round(Math.sin(t * 22));
+        feet = [[x - 1, y], [x + 1, y]]; hands = [[x + f * 2, y - 6 + sh], [x + f * 3, y - 6 + sh]];
+        break;
+      }
+      default: feet = [[x - 1, y], [x + 1, y]]; hands = [[x - 2, y - 2], [x + 2, y - 2]];
+    }
+    m._hands = hands;
+    // body
+    ln(neck[0], neck[1], hip[0], hip[1], c);
+    for (const ft of feet) ln(hip[0], hip[1], ft[0], ft[1], c);
+    const sh = [neck[0], neck[1] + 1];
+    for (const hd of hands) ln(sh[0], sh[1], hd[0], hd[1], c);
+    // head: a little round 3x3
+    for (const [a, b] of [[0, -1], [-1, 0], [0, 0], [1, 0], [0, 1], [-1, 1], [1, 1]]) pp(head[0] + a + 0.5, head[1] + b + 0.5, c);
+    // what he carries
+    const hd = hands[1];
+    if (m.carry) { for (let q = -3; q <= 3; q++) { pp(x + q, y - 8, 0x7A5232); pp(x + q, y - 9, 0x5C3A22); } pp(x + 4, y - 8, 0xC9A06A); }
+    if (m.tool === "axe" && m.pose === "swing") {
+      const dx = hd[0] - x, dy = hd[1] - (y - 4), l = Math.hypot(dx, dy) || 1;
+      const ex = hd[0] + (dx / l) * 2, ey = hd[1] + (dy / l) * 2;
+      ln(hd[0], hd[1], ex, ey, 0x8A5A32);
+      pp(ex + 0.5, ey + 0.5, 0xB8BCC4); pp(ex + 0.5 + f, ey + 0.5, 0x8E939C);
+    } else if (m.tool === "hammer" && m.pose === "swing") {
+      const dx = hd[0] - x, dy = hd[1] - (y - 4), l = Math.hypot(dx, dy) || 1;
+      const ex = hd[0] + (dx / l) * 2, ey = hd[1] + (dy / l) * 2;
+      ln(hd[0], hd[1], ex, ey, 0x8A5A32);
+      pp(ex + 0.5, ey + 0.5, 0x6E6E74); pp(ex - dy / l + 0.5, ey + dx / l + 0.5, 0x6E6E74);
+    } else if (m.tool === "can") {
+      pp(hd[0] + 0.5, hd[1] + 0.5, 0x6F8FA8); pp(hd[0] + f + 0.5, hd[1] + 0.5, 0x6F8FA8); pp(hd[0] + 0.5, hd[1] + 1.5, 0x5A7890); pp(hd[0] + f + 0.5, hd[1] + 1.5, 0x5A7890);
+      pp(hd[0] + f * 2 + 0.5, hd[1] - 0.5, 0x6F8FA8);
+    } else if (m.tool === "rake") {
+      ln(hands[0][0], hands[0][1], x - f * 5, y, 0x8A5A32);
+      for (let q = -1; q <= 1; q++) pp(x - f * 5 + 0.5, y + q + 0.5, 0x5C4A3A);
+    } else if (m.tool === "cig") {
+      const cx = m.hand ? head[0] + f : hd[0] + f, cyy = m.hand ? head[1] + 1 : hd[1];
+      pp(cx + 0.5, cyy + 0.5, 0xEDE6D8);
+      const ember = m.hand ? 0xFF7A2A : 0xD8502A;
+      post(() => postPx(cx + f + 0.5, cyy + 0.5, ember));
+      if (prefs.time !== "day") glow(cx + f + 0.5, cyy + 0.5, m.hand ? 4 : 2.5, 0xFF7A2A, 0.35);
+    } else if (m.tool === "seed") {
+      pp(hd[0] + 0.5, hd[1] + 1.5, 0x6B4A2A);
+    }
+    if (m.pose === "hold") post(() => drawArrow(hd[0] + f, hd[1] - 2));
+    if (m.bubble) post(() => drawBubble(x, y - 12, m.bubble));
+  }
+
+  const ICONS = {
+    bang: [[0, 1, 0], [0, 1, 0], [0, 1, 0], [0, 0, 0], [0, 1, 0]],
+    question: [[1, 1, 0], [0, 0, 1], [0, 1, 0], [0, 0, 0], [0, 1, 0]],
+    heart: [[1, 0, 1], [1, 1, 1], [1, 1, 1], [0, 1, 0]],
+    note: [[0, 1, 1], [0, 1, 0], [0, 1, 0], [1, 1, 0]],
+    angry: [[1, 0, 1], [0, 1, 0], [1, 0, 1]],
+    cloud: [[0, 1, 0], [1, 1, 1], [0, 0, 0], [1, 0, 1]],
+  };
+  const ICON_COLOR = { bang: 0xD23B2B, question: 0x3A3A44, heart: 0xE8607A, note: 0x3A3A44, angry: 0xD23B2B, cloud: 0x6A6A74 };
+  function drawBubble(cx, by, kind) {
+    const icon = ICONS[kind], ih = icon.length;
+    const top = by - ih - 2, bh = ih + 4;
+    for (let r = 0; r < bh; r++) for (let q = -3; q <= 3; q++) {
+      const edge = r === 0 || r === bh - 1 || q === -3 || q === 3;
+      const corner = (r === 0 || r === bh - 1) && (q === -3 || q === 3);
+      if (corner) continue;
+      postPx(cx + q, top + r, edge ? 0x2A2420 : 0xF6F2EA);
+    }
+    postPx(cx - 1, top + bh, 0x2A2420); postPx(cx, top + bh, 0xF6F2EA); postPx(cx, top + bh + 1, 0x2A2420);
+    icon.forEach((row, r) => row.forEach((v, q) => v && postPx(cx - 1 + q, top + 2 + r, ICON_COLOR[kind])));
+  }
+  const ARROW = ["X....", "XX...", "XWX..", "XWWX.", "XWWWX", "XWXX.", "XX.X.", "...X."];
+  function drawArrow(x, y) {
+    ARROW.forEach((row, r) => [...row].forEach((ch, q) => { if (ch !== ".") postPx(x + q, y + r, ch === "X" ? 0x101010 : 0xFFFFFF); }));
+  }
+
+  // ---------- the dog ----------
+  const DOG_COLORS = [[0x8A5A2B, 0x6B4220], [0x2A2420, 0x14100E], [0xE8DCC6, 0xB8A890], [0xC07A34, 0x8E5420]];
+  function updateDog(d, dt) {
+    const m = life.man;
+    if (d.heartT > 0) d.heartT -= dt;
+    d.wag += dt * (d.state === "follow" || d.state === "fetch" ? 14 : 5);
+    d.walking = false;
+    const hs = life.house;
+    if (m.hidden && hs) {
+      if (!move(d, hs.x - 10, hs.y + 2, 10, dt, 0.25)) return;
+      d.state = "sleep";
+      if (Math.random() < dt * 0.4) part("z", d.x, d.y - 3, rand(1, 2), rand(-4, -2), 1.8, 0);
+      return;
+    }
+    if (d.state === "sleep") d.state = "follow";
+    if (d.state === "arrive") {
+      if (move(d, m.x - m.face * 5, m.y + 1, 14, dt, 0.25)) {
+        d.state = "follow";
+        bubble(m, "heart", 2.5);
+        for (let q = 0; q < 3; q++) part("heart", d.x, d.y - 5, rand(-2, 2), rand(-7, -4), 1.4, 0);
+        sfx.bark();
+      }
+      return;
+    }
+    if (d.state === "fetch") {
+      const s = life.stick;
+      if (!s) { d.state = "follow"; return; }
+      if (!s.land) { move(d, s.tx, s.ty, 22, dt, 0.25); return; }
+      if (!d.hasStick) {
+        if (move(d, s.x, s.y, 24, dt, 0.25)) { d.hasStick = true; }
+        return;
+      }
+      s.x = d.x + d.face * 3; s.y = d.y - 1;
+      if (move(d, m.x + m.face * 3, m.y + 1, 18, dt, 0.25)) { life.stick = null; d.hasStick = false; d.state = "follow"; d.face = -m.face; part("heart", d.x, d.y - 5, 0, -6, 1, 0); }
+      return;
+    }
+    if (m.task && m.task.kind === "chase") { move(d, m.x - m.face * 4, m.y + 2, 28, dt, 0.25); if (Math.random() < dt * 2) sfx.bark(); return; }
+    // follow, with the odd sniff, dig or burst of zoomies
+    d.t -= dt;
+    if (d.mode === "zoom") {
+      d.ang += dt * 4;
+      move(d, m.x + Math.cos(d.ang) * 12, m.y + Math.sin(d.ang) * 8, 32, dt, 0.2);
+      if (d.t <= 0) d.mode = null;
+      return;
+    }
+    if (d.mode === "sniff") {
+      if (move(d, d.to[0], d.to[1], 8, dt, 0.2) && d.t > 0.8) { d.pose = "sniff"; }
+      if (d.t <= 0) d.mode = null;
+      return;
+    }
+    if (d.mode === "dig") {
+      d.pose = "dig";
+      if (Math.random() < dt * 10) { part("dirt", d.x + d.face * -2, d.y, -d.face * rand(4, 12), rand(-12, -4), 0.5, 0xB8A888); dent(d.x + d.face, d.y + 0.5, 0.08); }
+      if (d.t <= 0) d.mode = null;
+      return;
+    }
+    if (d.t <= 0) {
+      const r = Math.random();
+      d.t = rand(6, 14);
+      if (r < 0.35) { d.mode = "sniff"; d.to = findSpot(m.x, m.y, 18, 1) || [d.x, d.y]; d.t = rand(3, 5); }
+      else if (r < 0.5) { d.mode = "dig"; d.t = rand(1.5, 2.5); }
+      else if (r < 0.62) { d.mode = "zoom"; d.ang = Math.atan2(d.y - m.y, d.x - m.x); d.t = rand(2.5, 4); sfx.bark(); }
+    }
+    const tx = m.x - m.face * 6, ty = m.y + 2;
+    if (Math.hypot(tx - d.x, ty - d.y) > 3) move(d, tx, ty, Math.hypot(tx - d.x, ty - d.y) > 20 ? 20 : 11, dt, 0.25);
+    d.pose = m.pose === "sit" || m.pose === "lie" || m.pose === "kneel" ? "sit" : null;
+    if (!d.walking && Math.abs(m.x - d.x) > 1) d.face = m.x > d.x ? 1 : -1;
+  }
+  function drawDog(d) {
+    const x = Math.floor(d.x), y = Math.floor(d.y), f = d.face;
+    const [c, dk] = DOG_COLORS[d.color];
+    const at = (a, b, col) => pp(x + a * f + 0.5, y + b + 0.5, col);
+    if (d.state === "sleep") {
+      for (let q = -2; q <= 2; q++) { at(q, -1, c); at(q, 0, dk); }
+      at(2, -2, c); at(-3, 0, c);
+      return;
+    }
+    const walking = d.walking, st = Math.floor(d.anim * 2) % 2;
+    const wag = Math.sin(d.wag) > 0 ? -3 : -2;
+    if (d.pose === "sit") {
+      at(-1, -1, c); at(0, -1, c); at(0, -2, c); at(1, -2, c); at(1, -3, c); at(2, -3, c); at(2, -4, dk); at(3, -3, dk);
+      at(-1, 0, c); at(1, 0, c); at(-2, wag + 2, c);
+      return;
+    }
+    const sniff = d.pose === "sniff" || d.pose === "dig";
+    // body
+    for (let q = -1; q <= 1; q++) { at(q, -2, c); at(q, -1, dk); }
+    // head
+    const hy = sniff ? -1 : -3;
+    at(2, hy, c); at(2, hy + 1, c); at(3, hy + 1, c); at(4, hy + 1, 0x141010); at(1, hy - (sniff ? 0 : 0) - 1, dk);
+    // legs
+    if (walking) { at(st ? -1 : 0, 0, dk); at(st ? 1 : 2, 0, dk); } else { at(-1, 0, dk); at(1, 0, dk); }
+    // tail
+    at(-2, wag + 1, c);
+    if (d.hasStick) at(4, hy + 2, 0x7A5232), at(5, hy + 2, 0x7A5232), at(3, hy + 2, 0x7A5232);
+    if (d.heartT > 0) post(() => drawBubble(x, y - 8, "heart"));
+  }
+  function updateStick(dt) {
+    const s = life.stick;
+    if (!s || s.land) return;
+    s.f += dt / 0.7;
+    const f = Math.min(1, s.f);
+    s.x = s.sx + (s.tx - s.sx) * f; s.y = s.sy + (s.ty - s.sy) * f; s.z = Math.sin(f * Math.PI) * 12;
+    if (f >= 1) { s.land = true; s.z = 0; dent(s.x, s.y, 0.3); }
+  }
+  function drawStick(s) {
+    if (life.dog && life.dog.hasStick) return;
+    pp(s.x + 0.5, s.y + 0.5, 0x1A140E, 60);
+    const yy = s.y - (s.z || 0);
+    pp(s.x - 1 + 0.5, yy + 0.5, 0x7A5232); pp(s.x + 0.5, yy + 0.5, 0x7A5232); pp(s.x + 1 + 0.5, yy - 0.5, 0x7A5232);
+  }
+
+  // ---------- main hooks ----------
+  function startLife() {
+    life.on = true;
+    if (!life.house) siteHouse();
+    if (!life.man) {
+      const fromLeft = Math.random() < 0.5;
+      life.man = newMan(fromLeft ? -4 : W + 4, clamp(life.house.y + rand(-10, 10), 24, H - 30));
+      life.man.task = { kind: "arrive" };
+    }
+    life.man.ghost = false;
+  }
+  function resetLife() {
+    life.man = null; life.dog = null; life.trees = []; life.stumps = []; life.logs = []; life.pile = 0;
+    life.house = null; life.fire = null; life.stick = null; life.parts = []; life.held = 0; life.since = 0; life.dogDue = 300;
+    document.body.classList.remove("held");
+    if (life.on) startLife();
+  }
+  function updateLife(dt) {
+    if (!life.on || !life.man) return;
+    life.since += dt;
+    updateTrees(dt);
+    updateMan(life.man, dt);
+    updateStick(dt);
+    if (!life.dog && life.since > life.dogDue && !life.man.hidden && prefs.time !== "night") {
+      const fromLeft = life.man.x > W / 2;
+      life.dog = { x: fromLeft ? -4 : W + 4, y: clamp(life.man.y + rand(-8, 8), 20, H - 20), face: fromLeft ? 1 : -1, state: "arrive",
+        color: (Math.random() * DOG_COLORS.length) | 0, anim: 0, wag: 0, t: 5, heartT: 0 };
+    }
+    if (life.dog) updateDog(life.dog, dt);
+    updateParts(dt);
+    if (life.since % 15 < dt) scheduleSave();
+  }
+  function drawLife() {
+    if (!life.on || !life.man) return;
+    const items = [];
+    for (const tr of life.trees) items.push([tr.y, () => drawTree(tr), tr.stage >= 2 ? [tr.x + 2, tr.y + 0.5, tr.stage >= 3 ? 5 : 2.5, 1.4] : null]);
+    for (const s of life.stumps) items.push([s.y, () => { const x = Math.floor(s.x), y = Math.floor(s.y); pp(x, y, 0x5C3A22); pp(x + 1, y, 0x5C3A22); pp(x, y - 1, 0xC9A06A); pp(x + 1, y - 1, 0xB08A58); }, null]);
+    for (const lg of life.logs) items.push([lg.y, () => drawLog(lg.x, lg.y), [lg.x, lg.y + 1, 3, 1]]);
+    if (life.house) items.push([life.house.y, () => drawHouse(life.house), life.house.stage >= 2 ? [life.house.x + 2, life.house.y + 1.5, 10, 2.5] : null]);
+    if (life.fire) items.push([life.fire.y, () => drawFire(life.fire), null]);
+    if (life.stick) items.push([life.stick.y, () => drawStick(life.stick), null]);
+    if (life.dog) items.push([life.dog.y, () => drawDog(life.dog), [life.dog.x, life.dog.y + 0.5, 3, 1]]);
+    const m = life.man;
+    if (!m.hidden) items.push([m.y + 0.1, () => drawMan(m), [m.x + 1, m.y + 0.5, 2.5, 1]]);
+    for (const it of items) if (it[2]) shadow(it[2][0], it[2][1], it[2][2], it[2][3], 60);
+    items.sort((a, b) => a[0] - b[0]);
+    for (const it of items) it[1]();
+    drawParts();
+  }
+  function hitMan(x, y) {
+    const m = life.man;
+    return life.on && m && !m.hidden && Math.abs(x - m.x) < 3.5 && y > m.y - 10 && y < m.y + 2;
+  }
+  function hitDog(x, y) {
+    const d = life.dog;
+    return life.on && d && Math.abs(x - d.x) < 4 && y > d.y - 5 && y < d.y + 2;
+  }
+  function serializeLife() {
+    return {
+      on: life.on, house: life.house, trees: life.trees.filter((tr) => !tr.fall), stumps: life.stumps, logs: life.logs, pile: life.pile,
+      dog: life.dog ? { x: life.dog.x, y: life.dog.y, color: life.dog.color } : null,
+      man: life.man ? { x: life.man.x, y: life.man.y, carry: life.man.carry } : null, since: life.since, dogDue: life.dogDue,
+    };
+  }
+  function restoreLife(s, fx, fy) {
+    if (!s) return;
+    const sc = (o) => (o ? { ...o, x: o.x * fx, y: o.y * fy } : o);
+    life.house = sc(s.house); life.trees = (s.trees || []).map(sc); life.stumps = (s.stumps || []).map(sc); life.logs = (s.logs || []).map(sc);
+    life.pile = s.pile || 0; life.since = s.since || 0; life.dogDue = s.dogDue || 300;
+    if (s.man) { life.man = newMan(s.man.x * fx, s.man.y * fy); life.man.carry = !!s.man.carry; }
+    if (s.dog) life.dog = { x: s.dog.x * fx, y: s.dog.y * fy, face: 1, state: "follow", color: s.dog.color || 0, anim: 0, wag: 0, t: 5, heartT: 0 };
+    if (s.on) startLife();
+  }
+  function scaleLife(fx, fy) {
+    const sc = (o) => { if (o) { o.x *= fx; o.y *= fy; } };
+    sc(life.house); life.trees.forEach(sc); life.stumps.forEach(sc); life.logs.forEach(sc); sc(life.man); sc(life.dog); sc(life.fire); sc(life.stick);
+  }
+
 
   // ---------------- UI ----------------
   const body = document.body;
@@ -1027,6 +1980,14 @@ input[type="range"] { width: 100%; margin: 0; accent-color: var(--accent); }
   });
   choiceGroup("size", SIZES, null, (i) => { prefs.size = i; ghostSize = nextGhost(); savePrefsOnly(); });
   choiceGroup("moss", ["off", "on"], null, (i) => { prefs.moss = i; savePrefsOnly(); });
+  choiceGroup("man", ["off", "on"], null, (i) => {
+    const was = prefs.man;
+    prefs.man = i;
+    if (i) { startLife(); if (!was) say("here he comes"); }
+    else { life.on = false; life.held = 0; body.classList.remove("held"); }
+    savePrefsOnly();
+  });
+  document.getElementById("manReset").addEventListener("click", () => { resetLife(); scheduleSave(); say("a fresh start for him"); });
   const tines = document.getElementById("tines"), tinesOut = document.getElementById("tinesOut");
   const depth = document.getElementById("depth"), depthOut = document.getElementById("depthOut");
   const volume = document.getElementById("volume"), volumeOut = document.getElementById("volumeOut");
@@ -1054,6 +2015,8 @@ input[type="range"] { width: 100%; margin: 0; accent-color: var(--accent); }
     mark("time", (i) => TIMES[i] === prefs.time);
     mark("size", (i) => i === prefs.size);
     mark("moss", (i) => i === (prefs.moss ? 1 : 0));
+    mark("man", (i) => i === (prefs.man ? 1 : 0));
+    document.getElementById("manReset").hidden = !prefs.man;
     tines.value = prefs.tines; tinesOut.textContent = prefs.tines + " tines";
     depth.value = prefs.depth; depthOut.textContent = prefs.depth;
     volume.value = prefs.volume; volumeOut.textContent = prefs.volume;
@@ -1094,6 +2057,7 @@ input[type="range"] { width: 100%; margin: 0; accent-color: var(--accent); }
 
   canvas.addEventListener("contextmenu", (e) => {
     e.preventDefault();
+    if (life.held) return;
     const [x, y] = toGame(e);
     const r = rockAt(x, y);
     if (r) {
@@ -1108,12 +2072,14 @@ input[type="range"] { width: 100%; margin: 0; accent-color: var(--accent); }
   });
 
   canvas.addEventListener("pointerdown", (e) => {
-    if (e.button !== 0) return;
+    if (e.button !== 0 || life.held) return;
     if (prefs.sound && !soundOn()) setSound(1);
     dismissHint();
     wake();
     if (!panel.hidden) openPanel(false);
     const [x, y] = toGame(e);
+    if (hitMan(x, y)) { poke(life.man); return; }
+    if (hitDog(x, y)) { life.dog.heartT = 1.2; life.dog.wag += 3; sfx.bark(); return; }
     try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
     dragging = true; last = [x, y]; moved = 0;
     cursor.on = true; cursor.x = x; cursor.y = y;
@@ -1165,6 +2131,7 @@ input[type="range"] { width: 100%; margin: 0; accent-color: var(--accent); }
     }
     cursor.on = true; cursor.x = x; cursor.y = y;
     hoverRock = tool === "stone" || tool === "rings" ? rockAt(x, y) : null;
+    if (life.held) return;
     if (!dragging) { if (e.pointerType === "mouse") wake(); return; }
     const [lx, ly] = last;
     const seg = Math.hypot(x - lx, y - ly);
@@ -1211,13 +2178,14 @@ input[type="range"] { width: 100%; margin: 0; accent-color: var(--accent); }
   canvas.addEventListener("pointerleave", () => { if (!dragging) cursor.on = false; });
 
   canvas.addEventListener("wheel", (e) => {
-    if (tool !== "stone") return;
+    if (tool !== "stone" || life.held) return;
     e.preventDefault();
     const [a, b] = [3.5, 16];
     ghostSize = clamp(ghostSize * (e.deltaY < 0 ? 1.1 : 0.9), a, b);
   }, { passive: false });
 
   window.addEventListener("keydown", (e) => {
+    if (life.held) { e.preventDefault(); return; }
     if (prefs.sound && !soundOn() && e.key !== "m" && e.key !== "M") setSound(1);
     if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) { e.preventDefault(); undo(); return; }
     if (e.target instanceof HTMLInputElement) {
@@ -1239,6 +2207,7 @@ input[type="range"] { width: 100%; margin: 0; accent-color: var(--accent); }
 
   // ---------------- go ----------------
   layout(true);
+  if (prefs.man && !life.on) startLife();
   applyTheme();
   refreshControls();
   refreshUndo();
